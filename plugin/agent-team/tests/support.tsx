@@ -197,14 +197,24 @@ export const boot = (
 
     return { value: undefined }
   })
+  // A test names files as the tool output would on its own system; the engine
+  // may hand the path back resolved against the plugin folder (a Windows path
+  // on Linux reads as relative), so a file matches by the path it ends with.
+  const fileAt = (path: string): string | undefined => {
+    const plain = (p: string) => p.replace(/\\/g, '/')
+    const asked = plain(path)
+    const key = Object.keys(world.files).find(k => asked === plain(k) || asked.endsWith(`/${plain(k)}`))
+
+    return key === undefined ? undefined : world.files[key]
+  }
   on('fs.stat', (_, e) => {
-    const text = world.files[e.path]
+    const text = fileAt(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
 
     return { value: { kind: 'file', size: text.length, mtimeMs: 0, isLink: false } }
   })
   on('fs.read', (_, e) => {
-    const text = world.files[e.path]
+    const text = fileAt(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
 
     return { value: text }
