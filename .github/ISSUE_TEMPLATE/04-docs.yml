@@ -1,0 +1,22 @@
+name: Documentation
+description: Something in the READMEs, CONTRIBUTING, the changelog or the team rules is missing, wrong or unclear.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: input
+    id: document
+    attributes:
+      label: Document
+      placeholder: README.md, section "Update and uninstall"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed text or change

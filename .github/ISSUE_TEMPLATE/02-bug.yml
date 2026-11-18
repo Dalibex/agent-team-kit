@@ -1,0 +1,69 @@
+name: Bug
+description: Something in the pane, the team or the rules does not work as described.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happens
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Screenshot of the pane, or the line Claude Code prints when a hook fails.
+  - type: input
+    id: version
+    attributes:
+      label: Kit version
+      placeholder: "0.8.4"
+    validations:
+      required: true
+  - type: input
+    id: claude_version
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Where
+      options:
+        - Desktop app (Windows)
+        - Desktop app (macOS)
+        - Terminal (Windows)
+        - Terminal (macOS)
+        - Terminal (Linux)
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical (data lost or Claude Code unusable)
+        - High (a feature does not work)
+        - Medium (works with a workaround)
+        - Low (cosmetic)
+    validations:
+      required: true

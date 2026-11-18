@@ -1,0 +1,43 @@
+# What every change to the kit must pass: the plugin's tests and the engine's
+# validation of the plugin and of the marketplace people install it from.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The Claude Code release the kit is tested with; bump it on purpose.
+  CLAUDE_CODE_VERSION: "2.1.325"
+
+jobs:
+  plugin:
+    name: plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: Validate the plugin and the marketplace
+        run: |
+          claude plugin validate plugin/agent-team
+          claude plugin validate .
+      - name: Test the plugin
+        run: claude plugin test plugin/agent-team
+      - name: The changelog has a section for the plugin's version
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('plugin/agent-team/.claude-plugin/plugin.json'))['version'])")
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }

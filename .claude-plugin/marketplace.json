@@ -1,0 +1,14 @@
+{
+  "name": "agent-team-kit",
+  "description": "A four-agent team and a side pane for Claude Code.",
+  "owner": {
+    "name": "Dalibex"
+  },
+  "plugins": [
+    {
+      "name": "agent-team",
+      "source": "./plugin/agent-team",
+      "description": "Four team agents (explorer, implementer, tester, reviewer) with project context in every brief, and a side pane in tabs: the team at work, usage limits and token spend, skill packs, builds and GitHub state. English and Spanish."
+    }
+  ]
+}

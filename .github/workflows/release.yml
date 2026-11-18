@@ -1,0 +1,54 @@
+# A version tag (vX.Y.Z) publishes the GitHub release: the install commands
+# plus that version's section of CHANGELOG.md. The plugin itself is installed
+# and updated through the marketplace, so the release carries no files.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the tag matches the plugin version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          declared=$(python3 -c "import json; print(json.load(open('plugin/agent-team/.claude-plugin/plugin.json'))['version'])")
+          if [ "$version" != "$declared" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME but plugin.json says $declared"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Release notes
+        run: |
+          {
+            echo '## Install'
+            echo
+            echo 'In Claude Code:'
+            echo
+            echo '```'
+            echo '/plugin marketplace add Dalibex/agent-team-kit'
+            echo '/plugin install agent-team@agent-team-kit'
+            echo '```'
+            echo
+            echo 'Then run `/agent-team rules` to add the team rules to your `CLAUDE.md`.'
+            echo
+            echo 'To update from an earlier version, in a terminal run `claude plugin marketplace update agent-team-kit` and `claude plugin update agent-team@agent-team-kit`, then `/reload-plugins`. Full guide in the [README](https://github.com/Dalibex/agent-team-kit/blob/'"$GITHUB_REF_NAME"'/README.md).'
+            echo
+            awk -v v="$VERSION" '
+              $0 ~ "^## \\[" v "\\]" { found = 1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md
+          } > notes.md
+          grep -q '^### ' notes.md || { echo "::error::No section for $VERSION in CHANGELOG.md"; exit 1; }
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "agent-team-kit $VERSION" --notes-file notes.md --latest

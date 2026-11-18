@@ -1,0 +1,30 @@
+{
+  "name": "agent-team",
+  "version": "0.8.4",
+  "description": "An all-in-one pane: the main Claude and its agents as pixel sprites, usage limits (5 h with its projection, weekly, context), per-role token spend, installs and builds, skill packs and loose skills kept per project, the repository's GitHub state, in tabs; plus the four team agents (explorer, implementer, tester, reviewer) with project context in every brief.",
+  "types": "./types/index.d.ts",
+  "license": "MIT",
+  "author": {
+    "name": "Dalibex"
+  },
+  "userConfig": {
+    "teamName": {
+      "type": "string",
+      "title": "Team name",
+      "description": "Shown in the pane's title as \"<NAME> TEAM\". Empty: AGENT TEAM.",
+      "default": ""
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "auto, en or es. auto: Spanish when the system language is Spanish, English otherwise.",
+      "default": "auto"
+    },
+    "updateCheck": {
+      "type": "boolean",
+      "title": "Check for updates",
+      "description": "Once a day, ask GitHub whether a newer agent-team release exists and say so in the pane. Turn off to never ask.",
+      "default": true
+    }
+  }
+}

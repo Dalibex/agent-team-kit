@@ -1,0 +1,27 @@
+name: Task
+description: Technical work that the person does not see directly (refactor, tests, CI, release).
+title: "[Task]: "
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What and why
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Planned steps
+      value: |
+        - [ ]
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done when
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: How it is verified
+      description: The commands or checks that show it is done.
