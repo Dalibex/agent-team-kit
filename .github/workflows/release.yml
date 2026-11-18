@@ -1,0 +1,42 @@
+# A version tag (vX.Y.Z) builds the kit's zip and publishes the GitHub release
+# with that version's section of CHANGELOG.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the tag matches the plugin version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          declared=$(python3 -c "import json; print(json.load(open('plugin/agent-team/.claude-plugin/plugin.json'))['version'])")
+          if [ "$version" != "$declared" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME but plugin.json says $declared"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build the zip
+        run: |
+          git archive --format=zip --prefix=agent-team-kit/ -o "agent-team-kit-${VERSION}.zip" HEAD \
+            -- . ':(exclude).github' ':(exclude)AGENTS.md'
+      - name: Release notes from the changelog
+        run: |
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "::error::No section for $VERSION in CHANGELOG.md"; exit 1; }
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "agent-team-kit-${VERSION}.zip" --title "agent-team-kit $VERSION" --notes-file notes.md

@@ -1,0 +1,14 @@
+* text=auto eol=lf
+
+# Windows entry points and scripts run under Windows PowerShell and cmd.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Shell and Python scripts must keep LF to run on Linux and macOS.
+*.sh text eol=lf
+*.py text eol=lf
+
+*.wav binary
+*.png binary
+*.zip binary

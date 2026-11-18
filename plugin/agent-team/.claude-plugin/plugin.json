@@ -1,0 +1,18 @@
+{
+  "name": "agent-team",
+  "version": "0.8.4",
+  "description": "An all-in-one pane: the main Claude and its agents as pixel sprites, usage limits (5 h with its projection, weekly, context), per-role token spend, installs and builds, skill packs and loose skills kept per project, the repository's GitHub state, in tabs; plus the four team agents (explorer, implementer, tester, reviewer) with project context in every brief.",
+  "types": "./types/index.d.ts",
+  "license": "MIT",
+  "author": {
+    "name": "Dalibex"
+  },
+  "userConfig": {
+    "teamName": {
+      "type": "string",
+      "title": "Nombre del equipo",
+      "description": "Sale en el título del panel como «<NOMBRE> TEAM». Vacío: AGENT TEAM.",
+      "default": ""
+    }
+  }
+}

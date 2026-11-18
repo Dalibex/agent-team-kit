@@ -1,0 +1,96 @@
+# What every change to the kit must pass: the plugin's tests and engine
+# validation, and both installers installing, updating and uninstalling
+# against a throw-away Claude folder.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The Claude Code release the kit is tested with; bump it on purpose.
+  CLAUDE_CODE_VERSION: "2.1.325"
+
+jobs:
+  plugin:
+    name: plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: Validate the plugin and the marketplace
+        run: |
+          claude plugin validate plugin/agent-team
+          claude plugin validate .
+      - name: Test the plugin
+        run: claude plugin test plugin/agent-team
+
+  installers-linux:
+    name: installers-linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Syntax
+        run: |
+          python3 -m py_compile scripts/kit.py
+          sh -n instalar-linux.sh
+          sh -n desinstalar-linux.sh
+      - name: Install, update and uninstall on a throw-away folder
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/claude"
+          mkdir -p "$dir"
+          printf '# Mis reglas\n\nAlgo mío.\n' > "$dir/CLAUDE.md"
+          sh instalar-linux.sh --nombre CI --reglas --sin-preguntas --claude-dir "$dir"
+          test -f "$dir/agent-team-kit/agent-team/.claude-plugin/plugin.json"
+          grep -q 'agent-team:reglas:inicio' "$dir/CLAUDE.md"
+          grep -q '"agent-team@agent-team-kit": true' "$dir/settings.json"
+          # a second run is an update and must leave everything in place
+          sh instalar-linux.sh --reglas --sin-preguntas --claude-dir "$dir"
+          test "$(grep -c 'agent-team:reglas:inicio' "$dir/CLAUDE.md")" = 1
+          sh desinstalar-linux.sh --sin-preguntas --claude-dir "$dir"
+          test ! -e "$dir/agent-team-kit"
+          ! grep -q 'agent-team:reglas' "$dir/CLAUDE.md"
+          grep -q 'Algo mío.' "$dir/CLAUDE.md"
+
+  installers-windows:
+    name: installers-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Syntax
+        shell: powershell
+        run: |
+          foreach ($file in Get-ChildItem scripts -Filter *.ps1) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors)
+            if ($errors) { $errors | ForEach-Object { Write-Error "$($file.Name): $_" }; exit 1 }
+          }
+      - name: Install, update and uninstall on a throw-away folder
+        shell: cmd
+        run: |
+          set "dir=%RUNNER_TEMP%\claude"
+          mkdir "%dir%"
+          (echo # Mis reglas& echo.& echo Algo mio.) > "%dir%\CLAUDE.md"
+          call .\instalar-windows.cmd -Nombre CI -Reglas -SinPreguntas -ClaudeDir "%dir%" || exit /b 1
+          if not exist "%dir%\agent-team-kit\agent-team\.claude-plugin\plugin.json" exit /b 1
+          findstr /c:"agent-team:reglas:inicio" "%dir%\CLAUDE.md" >nul || exit /b 1
+          call .\instalar-windows.cmd -Reglas -SinPreguntas -ClaudeDir "%dir%" || exit /b 1
+          call .\desinstalar-windows.cmd -SinPreguntas -ClaudeDir "%dir%" || exit /b 1
+          if exist "%dir%\agent-team-kit" exit /b 1
+          findstr /c:"agent-team:reglas" "%dir%\CLAUDE.md" >nul && exit /b 1
+          findstr /c:"Algo mio." "%dir%\CLAUDE.md" >nul || exit /b 1

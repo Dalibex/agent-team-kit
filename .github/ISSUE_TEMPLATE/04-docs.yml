@@ -1,0 +1,22 @@
+name: Documentation
+description: Something in LEEME.md, the READMEs, CONTRIBUTING or the rules is missing, wrong or unclear.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: input
+    id: document
+    attributes:
+      label: Document
+      placeholder: LEEME.md, section "Actualizar"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed text or change

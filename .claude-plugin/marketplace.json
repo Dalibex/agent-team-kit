@@ -1,0 +1,14 @@
+{
+  "name": "agent-team-kit",
+  "description": "The agent-team pane for Claude Code, installed by the agent-team kit.",
+  "owner": {
+    "name": "Dalibex"
+  },
+  "plugins": [
+    {
+      "name": "agent-team",
+      "source": "./plugin/agent-team",
+      "description": "All-in-one side pane in tabs: the main Claude and its four team agents, usage limits and token spend, skill packs, installs and builds with progress, and GitHub state"
+    }
+  ]
+}

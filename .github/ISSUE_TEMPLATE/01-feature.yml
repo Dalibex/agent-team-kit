@@ -1,0 +1,58 @@
+name: Feature
+description: Propose a new capability for the pane, the team or the installers.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Add an area label (`area: pane`, `area: team`, `area: installer`...) and a `priority:` label.
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What the person cannot do today, or does with effort. As a <who>, I want <what> so that <why>.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What changes, where it shows (pane tab, installer question, agent, rules).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Pane (desktop)
+        - Pane (terminal)
+        - Team agents and rules
+        - Windows installer
+        - Linux and macOS installer
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable results, each one checkable by a test or by hand.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: failure_cases
+    attributes:
+      label: Failure and limit cases
+      description: Empty or broken store, narrow pane, terminal, missing `claude`, update from the previous release...
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
