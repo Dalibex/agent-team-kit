@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { findRules, RULES_END, RULES_START, RULES_TEXT, rulesBlock } from '../hooks/rules'
+import { findRules, RULES_END, RULES_START, RULES_TEXT, rulesBlock, SHIPPED_BEFORE } from '../hooks/rules'
 import { UPDATE_KEY } from '../hooks/update'
 import { AGENT_TEAM_COMMAND, PANE, SPANISH, boot, start } from './support'
 import type { World } from './support'
@@ -137,16 +137,25 @@ test('legacy text outside a marked block does not stop the block from being kept
   expect(await run($, 'rules')).toContain('ya están al día')
 })
 
+/** SHA-256 of `RULES_TEXT` in v0.8.4 (`git show v0.8.4:plugin/agent-team/hooks/rules.ts`). */
+const RULES_0_8_4_SHA256 = '39647f936bfd5fb300fc0cff5fd5ab29c3b238667969cbcca722d099d6f0b13b'
+
 // ------------------------------------------------- 9. a block the person edited
 
 test('a block that is the text this plugin shipped before is replaced without a warning; an edited one says so', async ($, on) => {
   const world = boot(on, { env: { HOME } })
-  const shipped = RULES_TEXT.replace('QUESTIONS:', 'PREGUNTAS:')
-  world.files[FILE] = `${RULES_START}\n${shipped}\n${RULES_END}\n`
   await start($)
-  const first = await run($, 'rules')
-  expect(first).toContain('actualizadas')
-  expect(first).not.toContain('distinto')
+  expect(SHIPPED_BEFORE.length).toBeGreaterThan(0)
+  // The 0.8.4 text, pinned by the SHA-256 of what v0.8.4 shipped: a later edit of it would strand the blocks it wrote.
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(SHIPPED_BEFORE[0]))
+  expect([...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')).toBe(RULES_0_8_4_SHA256)
+  for (const shipped of SHIPPED_BEFORE) {
+    world.files[FILE] = `${RULES_START}\n${shipped}\n${RULES_END}\n`
+    const first = await run($, 'rules')
+    expect(first).toContain('actualizadas')
+    expect(first).not.toContain('distinto')
+    expect(world.files[FILE]).toBe(`${BLOCK}\n`)
+  }
 
   world.files[FILE] = `${RULES_START}\n${RULES_TEXT}\nMy own extra rule.\n${RULES_END}\n`
   const second = await run($, 'rules')

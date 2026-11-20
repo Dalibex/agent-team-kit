@@ -20,7 +20,7 @@ export const PANE = {
 export const SPANISH = { LANG: 'es_ES.UTF-8' } as const
 
 /** The version the mocked manifest (`.claude-plugin/plugin.json`) states: the one "running". */
-export const MANIFEST_VERSION = '0.8.4'
+export const MANIFEST_VERSION = '0.8.5'
 
 /**
  * A path as the tests name it: forward slashes and no drive. The engine hands a
@@ -93,6 +93,8 @@ export type World = {
   links: Record<string, string>
   /** Makes a `$.fs.write` to this path fail, once the test says. */
   failWrite: ((path: string) => boolean) | undefined
+  /** Makes a `$.fs.read` of this path fail, once the test says. */
+  failRead: ((path: string) => boolean) | undefined
   /** What each `$.command.register` declared. */
   registered: { name: string; description?: string; argumentHint?: string }[]
   /** The files the plugin removed (through `rm` or PowerShell's Remove-Item), by path. */
@@ -156,6 +158,7 @@ export const boot = (
     rawBytes: {},
     links: {},
     failWrite: undefined,
+    failRead: undefined,
     removed: [],
     registered: [],
     http: undefined,
@@ -290,6 +293,7 @@ export const boot = (
     return { value: { kind: 'file', size: text.length, mtimeMs: 0, isLink, ...(e.resolve ? { realPath: target(e.path) } : {}) } }
   })
   on('fs.read', (_, e) => {
+    if (world.failRead?.(plainPath(e.path)) === true) throw new Error('EBUSY: resource busy')
     const text = fileAt(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     const raw = world.rawBytes[target(e.path)]

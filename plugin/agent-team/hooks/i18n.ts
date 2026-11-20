@@ -102,6 +102,17 @@ const en = {
   'warn.repeat': 'similar to the brief from {minutes} min ago: continuing that agent with SendMessage would have cost less',
   'warn.review.one': 'Opus review of a {n}-line change: not needed for something this small',
   'warn.review.other': 'Opus review of a {n}-line change: not needed for something this small',
+  'warn.rounds': '{n} rounds: Claude should stop and ask you',
+
+  // the session log
+  'runs.heading': '{date} · {folder}',
+  'runs.branch': 'branch {branch}',
+  'runs.agent': '{role} ({model}): {task}',
+  'runs.status': 'status: {status}',
+  'runs.time': 'time: {time}',
+  'runs.rounds': 'rounds: {n}',
+  'runs.tokens': 'tokens: {input} in / {output} out',
+  'runs.warn': 'warning: {warn}',
 
   // git and GitHub
   'git.detached': 'detached HEAD',
@@ -368,6 +379,17 @@ const es: Record<Key, string> = {
   'warn.repeat': 'parecido al encargo de hace {minutes} min: continuar ese agente con SendMessage costaba menos',
   'warn.review.one': 'revisión con Opus de un cambio de {n} línea: para algo así no hacía falta',
   'warn.review.other': 'revisión con Opus de un cambio de {n} líneas: para algo así no hacía falta',
+  'warn.rounds': '{n} rondas: Claude debería parar y preguntarte',
+
+  // el registro de sesión
+  'runs.heading': '{date} · {folder}',
+  'runs.branch': 'rama {branch}',
+  'runs.agent': '{role} ({model}): {task}',
+  'runs.status': 'estado: {status}',
+  'runs.time': 'tiempo: {time}',
+  'runs.rounds': 'rondas: {n}',
+  'runs.tokens': 'tokens: {input} entrada / {output} salida',
+  'runs.warn': 'aviso: {warn}',
 
   'git.detached': 'HEAD suelto',
   'git.missing': 'git no está instalado o no respondió',

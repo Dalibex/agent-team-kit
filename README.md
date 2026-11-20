@@ -144,6 +144,7 @@ the desktop app:
 | `teamName` | Any name: "Ana" titles the pane "ANA TEAM" | empty: "AGENT TEAM" |
 | `language` | `auto`, `en`, `es` | `auto`: Spanish when your system is in Spanish, English otherwise |
 | `updateCheck` | `true`, `false` | `true`: once a day, ask GitHub for the latest release |
+| `sessionLog` | `true`, `false` | `true`: when a session that used the team ends, append a summary of its agents to `agent-team/runs.md` in the Claude config folder |
 
 ## Update and uninstall
 

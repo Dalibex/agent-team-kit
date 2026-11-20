@@ -7,7 +7,7 @@ import { kilo, levelOf, percentText, projectionOf, resetClock, roundTokens, wind
 import { choose, compactNow, copyText, createPack, deletePack, openPicker, pickerBack, pickGroup, refreshGit, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, togglePack, toggleSkillEdit, turnPage, viewAgent } from './actions'
 import { drawTeam, gaugesOf, overReadTitle, slotsOf, usageAlt } from './drawing'
 import { BRAND, branding, clockText, titlePlate, COMPACT_AT, CONTEXT_COLOR, DEFAULT_BRANCHES, GIT_COLOR, JOB_MARK, JOB_METER, LEVEL_COLOR, LOOK, meterCols, nameOf, seconds, SKILL_COLOR, SPINNER, STATUS_MARK, statusText, tokenLine, TRACK, WARN } from './look'
-import { ciMark, EMPTY, familyOf, FIRST_TAB, spendParts, NO_PACKS, PACK_NAME_MAX, packDeleteAsk, PACKS_VIEW, freshOf, GIT_SHAPE, groupLabel, groupOf, isOverReading, jobRowsOf, NO_CHOICES, NO_GROUP, NO_IDS, NO_PICKER, NO_SLOTS, NO_UPDATE, PICK_PAGE, runMark, sessionTokensOf, SHOWN_ROWS, SKILLS_EDIT, slotLabel, TABS, TEAM_SHAPE, USAGE_SHAPE } from './state'
+import { ciMark, EMPTY, familyOf, FIRST_TAB, spendParts, NO_PACKS, PACK_NAME_MAX, packDeleteAsk, PACKS_VIEW, freshOf, GIT_SHAPE, groupLabel, groupOf, isOverReading, jobRowsOf, NO_CHOICES, NO_GROUP, NO_IDS, NO_PICKER, NO_SLOTS, NO_UPDATE, PICK_PAGE, ROUNDS_LIMIT, runMark, sessionTokensOf, SHOWN_ROWS, SKILLS_EDIT, slotLabel, TABS, TEAM_SHAPE, USAGE_SHAPE } from './state'
 import type { CardId } from './state'
 import { NO_USAGE } from './usage'
 import { NO_GIT } from './github'
@@ -305,7 +305,8 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       const isOpen = open.includes(a.id)
       const isRunning = a.status === 'running'
       const answer = a.answer ?? ''
-      const meta = [seconds((a.endedAt ?? at) - a.startedAt), familyOf(a.model)]
+      const rounds = a.rounds ?? 0
+      const meta = [seconds((a.endedAt ?? at) - a.startedAt), familyOf(a.model), rounds >= 1 ? `↻${rounds}` : undefined]
         .filter((part): part is string => part !== undefined && part !== '')
         .join(' · ')
       rows.push(
@@ -334,6 +335,9 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
           )}
           {a.warn !== undefined && (
             <Text color={WARN} wrap="truncate-end">{`⚠ ${a.warn}`}</Text>
+          )}
+          {rounds >= ROUNDS_LIMIT && (
+            <Text color={WARN} wrap="truncate-end">{`⚠ ${t('warn.rounds', { n: rounds })}`}</Text>
           )}
           {(a.skills?.length ?? 0) > 0 && (
             <Text color={SKILL_COLOR} dimColor wrap="truncate-end">{`✦ ${(a.skills ?? []).map(slotLabel).join(' · ')}`}</Text>

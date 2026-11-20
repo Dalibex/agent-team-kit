@@ -2,12 +2,12 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import type { AgentRow, MainLoop } from '../types'
 import { isCiRunning } from './github'
-import { adopt, afterShell, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, quietly, readTails, reconcile, refreshGit, refreshStatus, runTracked, scheduleGit, takeUsage } from './actions'
+import { adopt, afterShell, appendRuns, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, quietly, readTails, reconcile, refreshGit, refreshStatus, runTracked, scheduleGit, takeUsage } from './actions'
 import { beginLanguage, settleLanguage, t } from './i18n'
 import { branding, brandingOf, nameOf, seconds, setBranding } from './look'
 import { UPDATE_MS } from './update'
 import { renderPane } from './pane'
-import { addRun, apiErrorText, CI_POLL_MS, COMMAND, contextFor, DELEGATION_KEY, detailOf, isTeamBrief, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
+import { addRun, apiErrorText, CI_POLL_MS, COMMAND, contextFor, DELEGATION_KEY, detailOf, isTeamBrief, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, plusTokens, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
 import { NO_GIT } from './github'
 
 // The state this module reads or writes; refs written here, starts and shapes from state.ts.
@@ -23,6 +23,7 @@ const project = atom({ plugin: 'agent-team', key: 'project' } as const, '')
 const cwd = atom({ plugin: 'agent-team', key: 'cwd' } as const, '')
 const choices = atom({ plugin: 'agent-team', key: 'choices' } as const, NO_CHOICES)
 const delegation = atom({ plugin: 'agent-team', key: 'delegation' } as const, true)
+const logged = atom({ plugin: 'agent-team', key: 'logged' } as const, NO_LOGGED)
 
 export const register: Register = (on, options) => {
   setBranding(brandingOf(options.teamName))
@@ -105,6 +106,27 @@ export const register: Register = (on, options) => {
 
     return next(e)
   })
+
+  // A session that used the team leaves one entry in the session log: written
+  // from the pane's own state, no model involved. It never holds the end back.
+  on('session.end', async ($, e, next) => {
+    if (options.sessionLog !== false) {
+      await quietly(
+        (async () => {
+          await settleLanguage($, options.language)
+          const squad = await read($, team)
+          if (teamRows(squad.agents).length === 0) return
+          const where = whereOf(undefined, await read($, cwd), await read($, git))
+          const entry = runsEntry(squad, where, await $.clock.now(), await read($, logged))
+          if (entry === '') return
+          await appendRuns($, entry)
+          await update($, logged, () => markOf(squad))
+        })(),
+      )
+    }
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // The skills picked in the slots ride along with every prompt the person
   // sends while they stay picked: the model reads which to have loaded, the
@@ -354,6 +376,9 @@ export const register: Register = (on, options) => {
                     tokens: undefined,
                     answer: undefined,
                     skills: undefined,
+                    rounds: (a.rounds ?? 0) + 1,
+                    workedMs: workedOf(a, at),
+                    spent: plusTokens(a.spent, a.tokens),
                   } satisfies AgentRow)
                 : a,
             ),

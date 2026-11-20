@@ -34,7 +34,7 @@ body:
     id: version
     attributes:
       label: Kit version
-      placeholder: "0.8.4"
+      placeholder: "0.8.5"
     validations:
       required: true
   - type: input
