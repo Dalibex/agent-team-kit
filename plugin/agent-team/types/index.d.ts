@@ -41,6 +41,20 @@ export type AgentRow = {
   warn?: string
   /** The skills it loaded with the Skill tool in this run, in the order it loaded them. */
   skills?: string[]
+  /** Times it was woken again after it had ended (a SendMessage continuation). */
+  rounds?: number
+  /** Time worked in the rounds before the current one, in ms: a wake-up resets `startedAt`, this keeps the earlier work. */
+  workedMs?: number
+  /** Tokens used in the rounds before the current one: a wake-up clears `tokens`, this keeps the earlier work. */
+  spent?: Tokens
+}
+
+/** What the session log already holds, so a later entry (after /clear or a resume, the process living on) repeats nothing. */
+export type LoggedMark = {
+  /** The role totals when it was last written. */
+  totals: Partial<Record<Role, RoleTotal>>
+  /** A key of each agent row as it was written: its rounds, status and end. */
+  rows: Record<string, string>
 }
 
 /** What a long command is: a package install, a build or test run, or a download. */
@@ -245,6 +259,8 @@ declare module 'claude-code' {
       update: UpdateNotice | null
       /** What the skills tab shows: the packs, the loose skills, or one pack open to be edited. */
       skillView: SkillView
+      /** What the session log already holds; empty until the first entry is written. */
+      logged: LoggedMark
     }
   }
 }

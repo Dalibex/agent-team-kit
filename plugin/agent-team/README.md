@@ -131,6 +131,27 @@ otherwise); the Delegate switch stores `delegation` and drops the cached
 answer, so a change reaches the next conversation without breaking the
 prompt cache.
 
+Session log: when a session that used at least one team agent ends, the
+`session.end` hook appends an entry to `agent-team/runs.md` in the Claude
+config folder (`CLAUDE_CONFIG_DIR`, else `.claude` under the home folder),
+creating it if missing. The entry has the date, folder and branch, one item
+per team agent (role, model, task, status, time, rounds, tokens, warning) and
+the session's spend. An agent's time and tokens add up all its rounds. The
+pane writes it itself, no model is involved. The `sessionLog` option set to
+`false` writes nothing. Limits: the pane keeps the last 16 agents, so the
+oldest agents of a very long session may be missing; after a `/clear` or a
+resume the next entry holds only the agents that ran since the last one, and
+an agent seen again (still running then, or woken since) shows its totals so
+far, while the spend line counts only what is new; the file
+is read and written whole, so two sessions ending at the same moment can lose
+one entry, and past 4 MiB it can no longer be read, so it stops growing (it
+is never overwritten). The file is never trimmed: delete or move it when it
+gets long.
+
+Rounds: a team agent woken again after it ended (a SendMessage continuation)
+counts one round, shown as `↻n` on its row; from 5 on the row warns that
+Claude should ask the user.
+
 Language: every text the person sees comes from `hooks/i18n.ts`, which holds
 an English and a Spanish table with the same keys. The `language` option picks
 one (`en`, `es`); `auto`, the default, reads LC_ALL, LC_MESSAGES, LANG and

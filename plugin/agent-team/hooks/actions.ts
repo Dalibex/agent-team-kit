@@ -812,20 +812,51 @@ export async function takeUsage($: EngineInterface, figures: Pick<SessionMeasure
 // ------------------------------------------------------- the team rules in CLAUDE.md
 
 /**
- * Where the global CLAUDE.md is: CLAUDE_CONFIG_DIR, else the home folder with
+ * The Claude config folder: CLAUDE_CONFIG_DIR, else the home folder with
  * `.claude`. The home is USERPROFILE when it is set (what Node's os.homedir
  * reads first on Windows; POSIX has none), else HOME. Undefined when none is set.
  */
-export async function claudeMdPath($: EngineInterface): Promise<string | undefined> {
+export async function configDir($: EngineInterface): Promise<string | undefined> {
   const plain = (dir: string): string => dir.replace(/[\\/]+$/, '')
   const config = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined))?.trim()
-  if (config !== undefined && config !== '') return `${plain(config)}/CLAUDE.md`
+  if (config !== undefined && config !== '') return plain(config)
   const profile = (await $.env.get('USERPROFILE').catch(() => undefined))?.trim()
   const home = (await $.env.get('HOME').catch(() => undefined))?.trim()
   const base = profile !== undefined && profile !== '' ? profile : home
   if (base === undefined || base === '') return undefined
 
-  return `${plain(base)}/.claude/CLAUDE.md`
+  return `${plain(base)}/.claude`
+}
+
+/** Where the global CLAUDE.md is: in the config folder. */
+export async function claudeMdPath($: EngineInterface): Promise<string | undefined> {
+  const dir = await configDir($)
+
+  return dir === undefined ? undefined : `${dir}/CLAUDE.md`
+}
+
+/** Where the session log is, under the config folder. */
+export const RUNS_FILE = 'agent-team/runs.md'
+
+/**
+ * Appends an entry to the session log in the config folder (the file and its
+ * folder are made when missing). The engine has no append: the file is read
+ * and written whole, so two sessions ending at the same moment can lose one
+ * entry (the last write wins), and past the engine's 4 MiB read limit the read
+ * fails and the log stops growing. Whatever fails to read is left as it is:
+ * nothing is written over a log that could not be read. A symbolic link is
+ * written through to what it leads to.
+ */
+export async function appendRuns($: EngineInterface, entry: string): Promise<void> {
+  const dir = await configDir($)
+  if (dir === undefined || entry === '') return
+  const path = `${dir}/${RUNS_FILE}`
+  const exists = await $.fs.exists(path)
+  const stat = exists ? await $.fs.stat(path, { resolve: true }).catch(() => undefined) : undefined
+  const real = stat?.isLink === true && stat.realPath !== undefined ? stat.realPath : path
+  const before = exists ? await $.fs.read(real) : ''
+
+  await $.fs.write(real, `${typeof before === 'string' ? before : ''}${entry}`)
 }
 
 /** The copies of CLAUDE.md the pane keeps beside it: how they are named and how many stay. */

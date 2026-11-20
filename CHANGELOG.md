@@ -6,6 +6,31 @@ All notable changes to agent-team-kit. The format follows
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-20
+
+### Added
+
+- Rounds on each agent's row in the Team tab (`↻n`): how many times Claude
+  woke the agent again with SendMessage, flagged from the fifth round on.
+- Session log: when a session that used the team ends, the plugin appends a
+  summary of its agents (role, model, task, status, time, rounds, tokens and
+  waste warnings) to `agent-team/runs.md` in the Claude config folder. The
+  plugin writes it, not the model, so it costs no tokens; the `sessionLog`
+  option turns it off.
+- Team rules: a **Models** section (the implementer and the tester run on
+  Sonnet; a task that touches security, data integrity, a public interface,
+  several modules or delicate domain logic goes to Opus, and Claude says why)
+  and a **Fix loop** section (clear test failures and concrete correctness
+  findings go back to the implementer without asking; the tester reruns the
+  suite and the reviewer checks only the fix; Claude stops and asks after two
+  rounds without progress or five in total).
+
+### Changed
+
+- Team rules: a bug the tester finds is no longer always handed to the user;
+  the fix loop decides. Run `/agent-team rules` to update a block added by
+  0.8.4.
+
 ## [0.8.4] - 2026-11-19
 
 First public release.

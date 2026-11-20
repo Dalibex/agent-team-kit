@@ -1,12 +1,12 @@
 // The pane's state (atoms and store keys), its limits and timings, and the pure logic over the team.
 
-import type { AgentRow, AgentStatus, ArmedEntry, ForegroundJob, JobMatch, MainLoop, Pack, Role, RoleTotal, ShellTask, SkillChoice, SkillView, SlotPicker, Team, Tokens, UpdateNotice } from '../types'
+import type { AgentRow, LoggedMark, AgentStatus, ArmedEntry, ForegroundJob, JobMatch, MainLoop, Pack, Role, RoleTotal, ShellTask, SkillChoice, SkillView, SlotPicker, Team, Tokens, UpdateNotice } from '../types'
 import { opsOf } from './github'
 import { t, tn } from './i18n'
 import type { Key } from './i18n'
 import { classify, kindText, looksFailed, outputPathOf } from './jobs'
 import { kilo } from './usage'
-import { FAIL_SOUND, LOOK, nameOf, WARN } from './look'
+import { FAIL_SOUND, LOOK, nameOf, seconds, statusText, WARN } from './look'
 
 export const PANE = 'agent-team'
 export const COMMAND = 'agent-team'
@@ -876,6 +876,90 @@ export const spendParts = (squad: Team): { parts: { role: Role; text: string }[]
   const team = total - (squad.totals.main?.tokens ?? 0)
 
   return { parts, share: total === 0 || team === 0 ? '' : t('spend.share', { percent: Math.round((team / total) * 100) }) }
+}
+
+/** From this many rounds on, the pane tells Claude to ask the user (the team rules' limit). */
+export const ROUNDS_LIMIT = 5
+
+/** Nothing written to the session log yet. */
+export const NO_LOGGED: LoggedMark = { totals: {}, rows: {} }
+
+/** The sum of two token counts; undefined when there is neither. */
+export const plusTokens = (a: Tokens | undefined, b: Tokens | undefined): Tokens | undefined =>
+  a === undefined
+    ? b
+    : b === undefined
+      ? a
+      : { input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite }
+
+/** What a row worked in all its rounds, up to its end or `at`. */
+export const workedOf = (a: AgentRow, at: number): number => (a.workedMs ?? 0) + Math.max(0, (a.endedAt ?? at) - a.startedAt)
+
+/** How a row stood when it was logged: another key means it moved since. */
+const rowKey = (a: AgentRow): string => `${a.rounds ?? 0}|${a.status}|${a.endedAt ?? 0}`
+
+/** What an entry written now would leave in the log. */
+export const markOf = (squad: Team): LoggedMark => ({
+  totals: squad.totals,
+  rows: Object.fromEntries(teamRows(squad.agents).map(a => [a.id, rowKey(a)])),
+})
+
+/** What the roles used since `before`: the difference of the totals, a role with nothing new left out. */
+const spentSince = (totals: Team['totals'], before: Team['totals']): Team['totals'] => {
+  const out: Team['totals'] = {}
+  for (const role of Object.keys(totals) as Role[]) {
+    const now = totals[role] as RoleTotal
+    const was = before[role] ?? { runs: 0, tokens: 0 }
+    if (now.runs > was.runs || now.tokens > was.tokens) out[role] = { runs: now.runs - was.runs, tokens: now.tokens - was.tokens }
+  }
+
+  return out
+}
+
+/** The agent rows of the team's four roles, in the order they started. */
+export const teamRows = (agents: readonly AgentRow[]): AgentRow[] =>
+  agents.filter(a => a.role === 'explorer' || a.role === 'implementer' || a.role === 'tester' || a.role === 'reviewer')
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+/** `2026-11-20 14:05`, in the machine's own time. */
+const stampOf = (at: number): string => {
+  const d = new Date(at)
+
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/**
+ * The Markdown entry the session log gets when a session that used the team
+ * ends: a heading with the time, folder and branch, a bullet per team agent
+ * and the session's spend. Empty when no team agent ran.
+ */
+export const runsEntry = (squad: Team, where: { folder: string; branch?: string }, at: number, since: LoggedMark = NO_LOGGED): string => {
+  const rows = teamRows(squad.agents).filter(a => since.rows[a.id] !== rowKey(a))
+  if (rows.length === 0) return ''
+  squad = { ...squad, totals: spentSince(squad.totals, since.totals) }
+  const place = where.branch === undefined ? where.folder : `${where.folder} (${t('runs.branch', { branch: where.branch })})`
+  const lines = [`## ${t('runs.heading', { date: stampOf(at), folder: place })}`, '']
+  for (const a of rows) {
+    const sum = plusTokens(a.spent, a.tokens)
+    const used = sum === undefined ? undefined : t('runs.tokens', { input: kilo(sum.input), output: kilo(sum.output) })
+    const details = [
+      t('runs.status', { status: statusText(a.status) }),
+      t('runs.time', { time: seconds(workedOf(a, at)) }),
+      t('runs.rounds', { n: a.rounds ?? 0 }),
+      used,
+      a.warn === undefined ? undefined : t('runs.warn', { warn: a.warn }),
+    ].filter((part): part is string => part !== undefined)
+    lines.push(`- **${t('runs.agent', { role: nameOf(a.role), model: a.model ?? '?', task: a.description })}**`)
+    lines.push(`  ${details.join(' · ')}`)
+  }
+  const all = sessionTokensOf(squad)
+  if (all !== '') {
+    const { parts, share } = spendParts(squad)
+    lines.push('', `${t('spend.label')}: ${[...parts.map(p => p.text), share].filter(part => part !== '').join(' · ')}`)
+  }
+
+  return `${lines.join('\n')}\n\n`
 }
 
 /** The same spend as one line, for places with room for it. */
