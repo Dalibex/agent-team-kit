@@ -769,13 +769,18 @@ export const withTeamDelegation = (description: string): string =>
 
 /**
  * A heading of the team's brief template, as a line opens with it: plain,
- * bulleted or bold and followed by a colon, or a Markdown heading on its own.
+ * bulleted or bold and followed by a colon, or a Markdown heading. Either may
+ * qualify the word ("## Why / decisions taken", "**Why (context)**:"); the
+ * word must end there, so "Goalkeeper:" is not the Goal.
  */
-const heading = (names: string): RegExp =>
-  new RegExp(
-    `(^|\\n)[ \\t]*(?:(?:[-*][ \\t]+)?(?:\\*\\*)?(?:${names})(?:\\*\\*)?[ \\t]*:|#{1,6}[ \\t]+(?:${names})[ \\t]*:?[ \\t]*(?=\\r?\\n|$))`,
-    'i',
+const heading = (names: string): RegExp => {
+  const word = `(?:${names})(?![\\p{L}\\p{N}])`
+
+  return new RegExp(
+    `(^|\\n)[ \\t]*(?:(?:[-*][ \\t]+)?(?:\\*\\*)?${word}[^\\r\\n:]{0,40}?(?:\\*\\*)?[ \\t]*:|#{1,6}[ \\t]+(?:\\*\\*)?${word})`,
+    'iu',
   )
+}
 const GOAL = heading('goal|objetivo')
 const WHY = heading('why|por qu[eé]')
 

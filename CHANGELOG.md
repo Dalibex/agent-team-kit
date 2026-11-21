@@ -6,11 +6,16 @@ All notable changes to agent-team-kit. The format follows
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-21
+
 ### Fixed
 
 - A background shell stopped with TaskStop leaves the running state in the
   Processes tab at once, shown as stopped, instead of staying as running for
   up to an hour.
+- A brief whose heading qualifies Goal or Why (`## Why / decisions taken`,
+  `**Why (context)**:`) no longer gets the "brief without Why" warning in the
+  Team tab.
 
 ## [0.8.5] - 2026-11-20
 

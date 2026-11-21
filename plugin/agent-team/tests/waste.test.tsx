@@ -166,3 +166,12 @@ test('a failed agent sent again is not a repeat, nor is the next plan step with 
 test('a Markdown heading counts as the template heading', () => {
   expect(briefWarning('## Goal\nAdd it.\n\n### Por qué\nIt broke.')).toBeUndefined()
 })
+
+test('a heading that qualifies its word still counts, and a longer word does not', () => {
+  expect(briefWarning('## Goal\nFix it.\n\n## Why / decision taken (with the user)\nIt broke.')).toBeUndefined()
+  expect(briefWarning('## Goal\nFix it.\n\n## Why / what was decided\n- A: it broke.')).toBeUndefined()
+  expect(briefWarning('**Goal**: fix it.\n**Why (context)**: it broke.')).toBeUndefined()
+  expect(briefWarning('## Objetivo del cambio\nx\n## Por qué lo hacemos\ny')).toBeUndefined()
+  expect(briefWarning('Goalkeeper: x\nWhyever: y')).toBe('encargo sin Goal ni Why: el agente tendrá que adivinar o explorar')
+  expect(briefWarning('## Goals and whys\nx')).toBe('encargo sin Goal ni Why: el agente tendrá que adivinar o explorar')
+})
