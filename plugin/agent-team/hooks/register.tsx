@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import type { AgentRow, MainLoop } from '../types'
 import { isCiRunning } from './github'
-import { adopt, afterShell, appendRuns, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, quietly, readTails, reconcile, refreshGit, refreshStatus, runTracked, scheduleGit, takeUsage } from './actions'
+import { adopt, afterShell, appendRuns, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, onTaskStop, quietly, readTails, reconcile, refreshGit, refreshStatus, runTracked, scheduleGit, takeUsage } from './actions'
 import { beginLanguage, settleLanguage, t } from './i18n'
 import { branding, brandingOf, nameOf, seconds, setBranding } from './look'
 import { UPDATE_MS } from './update'
@@ -314,6 +314,13 @@ export const register: Register = (on, options) => {
         return ran
       }
       if (e.tool === 'Bash' || e.tool === 'PowerShell') return runTracked($, e, () => next(e), at)
+    }
+    // A shell stopped with TaskStop gets no task notification: its answer closes the row.
+    if (e.tool === 'TaskStop') {
+      const ran = await next(e)
+      await quietly(onTaskStop($, e, ran))
+
+      return ran
     }
 
     return next(e)

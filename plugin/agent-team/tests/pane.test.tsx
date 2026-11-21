@@ -110,6 +110,70 @@ test('a background shell closes when its task notification arrives', async ($, o
   await ui.unmount()
 })
 
+test('a background shell stopped with TaskStop leaves the running state at once', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  mock.store(on, { tab: 'jobs' })
+  mock.env(on, SPANISH)
+  on('command.register', () => ({ value: { command: 'agent-team' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('tool.call', (_, e) =>
+    e.tool === 'TaskStop'
+      ? { result: { message: 'Stopped', task_id: 'bg-31', task_type: 'local_bash' } }
+      : { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: e.tool === 'Bash' ? 'bg-31' : 'bg-32' } },
+  )
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+
+    return <Text>engine</Text>
+  })
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'python -m http.server 8000', description: 'Serve the page', run_in_background: true })
+  await $.tool.call({ tool: 'PowerShell', command: 'npx serve .', description: 'Serve the docs', run_in_background: true })
+  await clock.advance(4000)
+  await $.tool.call({ tool: 'TaskStop', task_id: 'bg-31' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  // The stopped one is grey and done; the other keeps running.
+  expect(await ui.find({ type: 'Text', text: /^■$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^4s$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: SPIN })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a TaskStop by the deprecated shell_id closes the shell; a failed one leaves it running', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on, { tab: 'jobs' })
+  mock.env(on, SPANISH)
+  on('command.register', () => ({ value: { command: 'agent-team' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('tool.call', (_, e) =>
+    e.tool === 'TaskStop'
+      ? e.shell_id === 'bg-41'
+        ? { result: { message: 'Stopped', task_id: '', task_type: 'local_bash' } }
+        : { isError: true, result: 'No task found', text: 'No task found' }
+      : { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: e.description === 'First' ? 'bg-41' : 'bg-42' } },
+  )
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+
+    return <Text>engine</Text>
+  })
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'sleep 100', description: 'First', run_in_background: true })
+  await $.tool.call({ tool: 'Bash', command: 'sleep 200', description: 'Second', run_in_background: true })
+  await $.tool.call({ tool: 'TaskStop', shell_id: 'bg-41' })
+  await $.tool.call({ tool: 'TaskStop', task_id: 'bg-42' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.findAll({ type: 'Text', text: /^■$/ })).toHaveLength(1)
+  expect(await ui.findAll({ type: 'Text', text: SPIN })).toHaveLength(1)
+  await ui.unmount()
+})
+
 test('a task id read from the answer text is the one after "ID:", not the next word', async ($, on) => {
   const clock = mock.clock(on, { now: 1000 })
   mock.store(on, { tab: 'jobs' })
