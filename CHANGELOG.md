@@ -6,6 +6,12 @@ All notable changes to agent-team-kit. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A background shell stopped with TaskStop leaves the running state in the
+  Processes tab at once, shown as stopped, instead of staying as running for
+  up to an hour.
+
 ## [0.8.5] - 2026-11-20
 
 ### Added

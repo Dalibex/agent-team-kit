@@ -11,7 +11,7 @@ import { planInstall, planRemove } from './rules'
 import type { UpdateRecord } from './update'
 import { isNewer, manifestVersion, recordFrom, releaseFrom, RELEASE_URL, UPDATE_KEY, UPDATE_MS } from './update'
 import { branding, FAIL_SOUND, LOOK, seconds } from './look'
-import { ARMED_KEY, armedBookFrom, CHIME_GAP_MS, cleanPackName, DELEGATION_KEY, PACK_NAME_MAX, packsFrom, projectKeyOf, reviewWarning, shortstatLines, closeRow, COMMAND, EMPTY, FIRST_TAB, GIT_SHAPE, isShellRunning, jobEndOf, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_PICKER, NO_SLOTS, NO_UPDATE, PACK_SIZE, packDeleteAsk, PACKS_KEY, PACKS_VIEW, roleOf, shellOf, shellSound, SKILLS_EDIT, SLOTS_KEY, STALE_MS, statusOfListed, TAB_KEY, TAIL_MAX_BYTES, TEAM_SHAPE, titleOf, TOUCHES_GIT, TRAIL_KEY, USAGE_SHAPE, WARNED_KEY, withArmed, withJob, withRows, withShell } from './state'
+import { ARMED_KEY, armedBookFrom, CHIME_GAP_MS, cleanPackName, DELEGATION_KEY, PACK_NAME_MAX, packsFrom, projectKeyOf, reviewWarning, shortstatLines, closeRow, COMMAND, EMPTY, FIRST_TAB, GIT_SHAPE, isShellRunning, jobEndOf, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_PICKER, NO_SLOTS, NO_UPDATE, PACK_SIZE, packDeleteAsk, PACKS_KEY, PACKS_VIEW, roleOf, shellOf, shellSound, SKILLS_EDIT, SLOTS_KEY, STALE_MS, statusOfListed, stoppedIdOf, TAB_KEY, TAIL_MAX_BYTES, TEAM_SHAPE, titleOf, TOUCHES_GIT, TRAIL_KEY, USAGE_SHAPE, WARNED_KEY, withArmed, withJob, withRows, withShell } from './state'
 import type { CardId, GitOperation, Ran, ShellCall } from './state'
 import { NO_USAGE } from './usage'
 import { NO_GIT } from './github'
@@ -155,6 +155,21 @@ export async function closeShell(
   if (hit !== undefined) await quietly(update($, now, () => at))
 
   return hit
+}
+
+/**
+ * A background shell stopped with TaskStop: no task notification follows, so
+ * the call's own answer closes its row as stopped, at once.
+ */
+export async function onTaskStop(
+  $: EngineInterface,
+  asked: { task_id?: string; shell_id?: string },
+  ran: Ran,
+): Promise<void> {
+  const id = stoppedIdOf(asked, ran)
+  if (id === undefined) return
+  const closed = await closeShell($, { id, status: 'killed' }, 'stopped with TaskStop')
+  if (closed !== undefined) await quietly(refreshStatus($))
 }
 
 /**

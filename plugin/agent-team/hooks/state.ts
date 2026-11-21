@@ -661,6 +661,19 @@ export type ShellCall = { tool: string; tool_use_id?: string; command: string; d
 /** What a tool call answered, as far as the pane reads it. */
 export type Ran = { deny?: string; isError?: true; text?: string; result?: unknown }
 
+/**
+ * The task a TaskStop call stopped: the id its answer names, else the one it
+ * was asked for (`shell_id` is the deprecated name). None when it was denied
+ * or failed: the task may still run.
+ */
+export const stoppedIdOf = (asked: { task_id?: string; shell_id?: string }, ran: Ran): string | undefined => {
+  if (ran.deny !== undefined || ran.isError === true) return undefined
+  const answered = (ran.result as { task_id?: unknown } | undefined)?.task_id
+  const id = typeof answered === 'string' && answered !== '' ? answered : (asked.task_id ?? asked.shell_id)
+
+  return id === '' ? undefined : id
+}
+
 export type GitOperation = Parameters<typeof opsOf>[0]
 
 /** A running background shell whose output file may say how far it got. */
