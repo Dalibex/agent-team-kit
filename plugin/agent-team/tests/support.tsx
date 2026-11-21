@@ -20,7 +20,7 @@ export const PANE = {
 export const SPANISH = { LANG: 'es_ES.UTF-8' } as const
 
 /** The version the mocked manifest (`.claude-plugin/plugin.json`) states: the one "running". */
-export const MANIFEST_VERSION = '0.8.5'
+export const MANIFEST_VERSION = '0.8.6'
 
 /**
  * A path as the tests name it: forward slashes and no drive. The engine hands a
