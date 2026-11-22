@@ -8,7 +8,7 @@ import { kilo, levelOf, percentText, projectionOf, refreshContext, resetClock, r
 import { barCells, cacheShare, contextPercent, inTokens, NO_STATS, STATS_SHAPE, toolItems, topRest } from './stats'
 import { choose, compactNow, copyText, createPack, cycleEffort, cycleModel, deletePack, isWaitingForReload, openPicker, pickerBack, pickGroup, pressUpdateNow, quietly, refreshGit, resetModels, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, toggleNotify, togglePack, toggleSkillEdit, toggleSound, turnPage, viewAgent } from './actions'
 import { drawTeam, gaugesOf, overReadTitle, slotsOf, usageAlt } from './drawing'
-import { ASK, BRAND, branding, clockText, titlePlate, COMPACT_AT, CONTEXT_COLOR, DEFAULT_BRANCHES, GIT_COLOR, JOB_MARK, JOB_METER, LEVEL_COLOR, LOOK, meterCols, nameOf, OFF, seconds, SKILL_COLOR, SPINNER, STATUS_MARK, statusText, tokenLine, TRACK, USAGE_COLOR, WARN } from './look'
+import { ASK, BRAND, branding, clockText, titlePlate, COMPACT_AT, CONTEXT_COLOR, DEFAULT_BRANCHES, GIT_COLOR, JOB_MARK, JOB_METER, LEVEL_COLOR, LOOK, meterCols, nameOf, NOTIFY_OFF, NOTIFY_ON, seconds, SOUND_OFF, SOUND_ON, SKILL_COLOR, SPINNER, STATUS_MARK, statusText, tokenLine, TRACK, USAGE_COLOR, WARN } from './look'
 import { ciMark, DEFAULT_MODELS, EMPTY, familyOf, isCostlier, isDefaultChoice, TEAM_EFFORTS, TEAM_MODELS, TEAM_ROLES, FIRST_TAB, spendParts, NO_PACKS, PACK_NAME_MAX, packDeleteAsk, PACKS_VIEW, freshOf, GIT_SHAPE, groupLabel, groupOf, isAsking, isOverReading, jobRowsOf, NO_CHOICES, NO_GROUP, NO_IDS, NO_PICKER, NO_SLOTS, NO_UPDATE, PICK_PAGE, ROUNDS_LIMIT, runMark, sessionTokensOf, SHOWN_ROWS, SKILLS_EDIT, slotLabel, TABS, TEAM_SHAPE, USAGE_SHAPE } from './state'
 import type { CardId } from './state'
 import { NO_USAGE } from './usage'
@@ -279,26 +279,14 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   )
 
   /**
-   * The sound and notification switches: one glyph each (a Button holds only
-   * strings and Text), a red cross after it while off. Their label names them.
+   * The sound and notification switches. The desktop app draws a button's
+   * label and nothing else, so the label is the icon alone, its struck-out
+   * twin while off: a longer label widens the column and squeezes the drawing.
    */
-  const glyph = (icon: string, isOn: boolean) =>
-    isOn
-      ? [<Text key="icon">{icon}</Text>]
-      : [
-          <Text key="icon">{icon}</Text>,
-          <Text key="off" color={OFF}>
-            ✕
-          </Text>,
-        ]
   const toggles = (direction: 'row' | 'column') => (
     <Box key="toggles" flexDirection={direction} flexShrink={0} rowGap="xs" columnGap={1} {...(direction === 'column' ? { paddingTop: 'sm' as const } : {})}>
-      <Button key="toggle-sound" label={isSoundOn ? t('toggle.sound.on') : t('toggle.sound.off')} onPress={() => void toggleSound($)}>
-        {glyph('♪', isSoundOn)}
-      </Button>
-      <Button key="toggle-notify" label={isNotifyOn ? t('toggle.notify.on') : t('toggle.notify.off')} onPress={() => void toggleNotify($)}>
-        {glyph('🔔', isNotifyOn)}
-      </Button>
+      <Button key="toggle-sound" label={isSoundOn ? SOUND_ON : SOUND_OFF} onPress={() => void toggleSound($)} />
+      <Button key="toggle-notify" label={isNotifyOn ? NOTIFY_ON : NOTIFY_OFF} onPress={() => void toggleNotify($)} />
     </Box>
   )
 

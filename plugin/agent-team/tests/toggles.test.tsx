@@ -13,14 +13,13 @@ const press = async ($: Engine, key: string): Promise<void> => {
   await ui.unmount()
 }
 
-/** The label of a toggle's button, and whether the red cross is drawn over it. */
+/** The label of a toggle's button: the icon the desktop app draws, nothing else. */
 const toggle = async ($: Engine, key: string, surface: (typeof SURFACES)[number] = 'desktop') => {
   const ui = await $.ui.mount({ ...PANE, surface })
   const button = await ui.find({ type: 'Button', key })
-  const crosses = (await ui.findAll({ type: 'Text', text: '✕' })).length
   await ui.unmount()
 
-  return button === undefined ? undefined : { label: String(button.props.label), crosses }
+  return button === undefined ? undefined : String(button.props.label)
 }
 
 /** A long agent run that ends, so every channel (clip, system notification) has its reason to fire. */
@@ -34,52 +33,68 @@ const longRun = async ($: Engine, world: ReturnType<typeof boot>, id: string): P
 // ------------------------------------------------------------ the buttons
 
 for (const surface of SURFACES) {
-  test(`on ${surface} both toggles are drawn, on and with no cross, by default`, async ($, on) => {
+  test(`on ${surface} both toggles are drawn, on, by default`, async ($, on) => {
     boot(on)
     await start($)
 
-    expect(await toggle($, 'toggle-sound', surface)).toEqual({ label: 'Sonidos: activados (pulsa para silenciar)', crosses: 0 })
-    expect((await toggle($, 'toggle-notify', surface))?.label).toBe('Notificaciones del sistema: activadas (pulsa para desactivar)')
+    expect(await toggle($, 'toggle-sound', surface)).toEqual('🔊')
+    expect((await toggle($, 'toggle-notify', surface))).toBe('🔔')
   })
 }
 
-test('a press mutes the sounds, labels the button so and draws the red cross; another turns them on', async ($, on) => {
+test('a press mutes the sounds, shows the muted icon; another turns them on', async ($, on) => {
   const world = boot(on)
   await start($)
 
   await press($, 'toggle-sound')
-  expect(await toggle($, 'toggle-sound')).toEqual({ label: 'Sonidos: silenciados (pulsa para activar)', crosses: 1 })
-  expect((await toggle($, 'toggle-notify'))?.label).toMatch(/activadas/)
+  expect(await toggle($, 'toggle-sound')).toEqual('🔇')
+  expect((await toggle($, 'toggle-notify'))).toBe('🔔')
   expect(world.stored[SOUND_KEY]).toBe(false)
 
   await press($, 'toggle-sound')
-  expect(await toggle($, 'toggle-sound')).toEqual({ label: 'Sonidos: activados (pulsa para silenciar)', crosses: 0 })
+  expect(await toggle($, 'toggle-sound')).toEqual('🔊')
   expect(world.stored[SOUND_KEY]).toBe(true)
 })
 
-test('a press turns the notifications off, with a red cross, and on again', async ($, on) => {
+test('a press turns the notifications off, shows the struck-out bell, and on again', async ($, on) => {
   const world = boot(on)
   await start($)
 
   await press($, 'toggle-notify')
-  expect(await toggle($, 'toggle-notify')).toEqual({ label: 'Notificaciones del sistema: desactivadas (pulsa para activar)', crosses: 1 })
-  expect((await toggle($, 'toggle-sound'))?.label).toMatch(/activados/)
+  expect(await toggle($, 'toggle-notify')).toEqual('🔕')
+  expect((await toggle($, 'toggle-sound'))).toBe('🔊')
   expect(world.stored[NOTIFY_KEY]).toBe(false)
 
   await press($, 'toggle-notify')
   expect(await toggle($, 'toggle-notify'))
-    .toEqual({ label: 'Notificaciones del sistema: activadas (pulsa para desactivar)', crosses: 0 })
+    .toEqual('🔔')
   expect(world.stored[NOTIFY_KEY]).toBe(true)
 })
 
-test('both off draw two crosses', async ($, on) => {
+test('both off show both struck-out icons', async ($, on) => {
   boot(on)
   await start($)
   await press($, 'toggle-sound')
   await press($, 'toggle-notify')
 
-  expect((await toggle($, 'toggle-sound'))?.crosses).toBe(2)
+  expect(await toggle($, 'toggle-sound')).toBe('🔇')
+  expect(await toggle($, 'toggle-notify')).toBe('🔕')
 })
+
+// The desktop app draws a button's label alone: a long one widened the column and squeezed the drawing to a thumbnail.
+for (const surface of SURFACES) {
+  test(`on ${surface} each toggle is its icon alone, with no text beside it`, async ($, on) => {
+    boot(on)
+    await start($)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    for (const key of ['toggle-sound', 'toggle-notify']) {
+      const button = await ui.find({ type: 'Button', key })
+      expect([...String(button?.props.label)].length).toBe(1)
+      expect(button?.props.children ?? []).toEqual([])
+    }
+    await ui.unmount()
+  })
+}
 
 // ------------------------------------------------------------ the effect
 
@@ -175,8 +190,8 @@ test('the choices are read from the store when a session starts', async ($, on) 
   const world = boot(on, { env: {}, store: { [SOUND_KEY]: false, [NOTIFY_KEY]: false } })
   await start($)
 
-  expect(await toggle($, 'toggle-sound')).toEqual({ label: 'Sonidos: silenciados (pulsa para activar)', crosses: 2 })
-  expect((await toggle($, 'toggle-notify'))?.label).toMatch(/desactivadas/)
+  expect(await toggle($, 'toggle-sound')).toEqual('🔇')
+  expect((await toggle($, 'toggle-notify'))).toBe('🔕')
   await longRun($, world, 'a1')
   expect(world.clips).toEqual([])
   expect(world.notified).toEqual([])
@@ -186,8 +201,8 @@ test('a store with no value, or anything but false, starts them on', async ($, o
   boot(on, { store: { [SOUND_KEY]: 'no', [NOTIFY_KEY]: 0 } })
   await start($)
 
-  expect((await toggle($, 'toggle-sound'))?.label).toMatch(/activados/)
-  expect((await toggle($, 'toggle-notify'))?.label).toMatch(/activadas/)
+  expect((await toggle($, 'toggle-sound'))).toBe('🔊')
+  expect((await toggle($, 'toggle-notify'))).toBe('🔔')
 })
 
 test('a store that cannot be written does not break the toggle: it still flips for this session', async ($, on) => {
@@ -200,5 +215,5 @@ test('a store that cannot be written does not break the toggle: it still flips f
   })
   await press($, 'toggle-sound')
 
-  expect((await toggle($, 'toggle-sound'))?.label).toMatch(/silenciados/)
+  expect((await toggle($, 'toggle-sound'))).toBe('🔇')
 })
