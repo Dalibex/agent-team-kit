@@ -1,13 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import type { AgentRow, MainLoop } from '../types'
-import { isCiRunning } from './github'
-import { adopt, afterShell, appendRuns, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, onTaskStop, quietly, readTails, reconcile, refreshGit, refreshStatus, runTracked, scheduleGit, takeUsage } from './actions'
+import { ciPollMs } from './github'
+import { adopt, afterShell, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, onTaskStop, quietly, readTails, reconcile, refreshGit, refreshStatus, runTracked, scheduleGit, takeUsage, writeRuns } from './actions'
 import { beginLanguage, settleLanguage, t } from './i18n'
 import { branding, brandingOf, nameOf, seconds, setBranding } from './look'
 import { UPDATE_MS } from './update'
 import { renderPane } from './pane'
-import { addRun, apiErrorText, CI_POLL_MS, COMMAND, contextFor, DELEGATION_KEY, detailOf, isTeamBrief, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, plusTokens, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
+import { addRun, apiErrorText, COMMAND, contextFor, DELEGATION_KEY, detailOf, editPathOf, isMissedRound, isTeamBrief, TEAM_TYPES, withRead, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, plusTokens, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
 import { NO_GIT } from './github'
 
 // The state this module reads or writes; refs written here, starts and shapes from state.ts.
@@ -96,7 +96,9 @@ export const register: Register = (on, options) => {
           void quietly(checkForUpdate($, true))
         }
         const g = await read($, git)
-        if (g.state === 'ok' && !g.isLoading && isCiRunning(g) && at - g.remoteAt >= CI_POLL_MS) {
+        // GitHub is asked less often the longer CI stays unchanged, and no more after an hour of it.
+        const wait = ciPollMs(g)
+        if (g.state === 'ok' && !g.isLoading && wait !== undefined && at - g.remoteAt >= wait) {
           void refreshGit($, true)
         }
       } catch {
@@ -117,10 +119,12 @@ export const register: Register = (on, options) => {
           const squad = await read($, team)
           if (teamRows(squad.agents).length === 0) return
           const where = whereOf(undefined, await read($, cwd), await read($, git))
-          const entry = runsEntry(squad, where, await $.clock.now(), await read($, logged))
+          const at = await $.clock.now()
+          const entry = runsEntry(squad, where, at, await read($, logged))
           if (entry === '') return
-          await appendRuns($, entry)
-          await update($, logged, () => markOf(squad))
+          // Only what reached the log counts as logged: a skipped entry is tried again at a later end of
+          // this process (a /clear, a resume); on a real exit it is lost. The budget is read just before the write.
+          if (await writeRuns($, entry, at, e.sessionId, () => next.budget.remainingMs)) await update($, logged, () => markOf(squad))
         })(),
       )
     }
@@ -238,7 +242,7 @@ export const register: Register = (on, options) => {
     await quietly(update($, now, () => at))
     await quietly(refreshStatus($))
     // A reviewer on a small diff is said once git has counted it, off the spawn's path.
-    if (isNew && row.role === 'reviewer' && warn === undefined) void quietly(checkReviewSize($, started.agentId, e.cwd))
+    if (isNew && row.role === 'reviewer' && warn === undefined) void quietly(checkReviewSize($, started.agentId, e.cwd, e.prompt))
 
     return started
   }).catch(($, e, next) => next(e))
@@ -272,6 +276,8 @@ export const register: Register = (on, options) => {
       )
       if ((e.tool === 'Bash' || e.tool === 'PowerShell') && e.run_in_background === true) {
         const ran = await next(e)
+        // Refused or failed, nothing runs in the background: no row to wait an hour on.
+        if (ran.deny !== undefined || ran.isError === true) return ran
         const owner = (await read($, team)).agents.find(a => a.id === id)
         const shell = shellOf(e, ran, at, { id, role: owner?.role ?? 'other' })
         await quietly(update($, team, t => ({ ...t, shells: withShell(t.shells, shell) })))
@@ -290,6 +296,7 @@ export const register: Register = (on, options) => {
       const detail = detailOf(e)
       const line = detail === '' ? e.tool : `${e.tool} · ${detail}`
       const file = readPathOf(e)
+      const edit = editPathOf(e)
       await quietly(
         update($, team, t => ({
           ...t,
@@ -299,13 +306,14 @@ export const register: Register = (on, options) => {
             lastTool: e.tool,
             lastDetail: detail,
             log: [...t.main.log, line].slice(-LOG_LINES),
-            reads: file === undefined || t.main.reads.includes(file) ? t.main.reads : [...t.main.reads, file],
+            ...withRead(t.main, file, edit),
           },
         })),
       )
       await quietly(update($, now, () => at))
       if ((e.tool === 'Bash' || e.tool === 'PowerShell') && e.run_in_background === true) {
         const ran = await next(e)
+        if (ran.deny !== undefined || ran.isError === true) return ran
         const shell = shellOf(e, ran, at)
         await quietly(update($, team, t => ({ ...t, shells: withShell(t.shells, shell) })))
         await quietly(refreshStatus($))
@@ -366,7 +374,13 @@ export const register: Register = (on, options) => {
       const row = (await read($, team)).agents.find(a => a.id === id)
       if (row === undefined) {
         await quietly(adopt($, [id]))
-      } else if (row.status !== 'running') {
+        await quietly(update($, team, t => ({ ...t, agents: t.agents.map(a => (a.id === id ? { ...a, turnId: e.turnId } : a)) })))
+      } else if (row.status === 'running') {
+        // The turn's id tells a later end of another turn, whose start was missed, from this one's.
+        if (row.turnId !== e.turnId) {
+          await quietly(update($, team, t => ({ ...t, agents: t.agents.map(a => (a.id === id ? { ...a, turnId: e.turnId } : a)) })))
+        }
+      } else {
         await quietly(
           update($, team, t => ({
             ...t,
@@ -383,7 +397,9 @@ export const register: Register = (on, options) => {
                     tokens: undefined,
                     answer: undefined,
                     skills: undefined,
-                    rounds: (a.rounds ?? 0) + 1,
+                    turnId: e.turnId,
+                    // Rounds are the team rules' count: an agent outside the team has none.
+                    rounds: TEAM_TYPES.has(a.type) ? (a.rounds ?? 0) + 1 : a.rounds,
                     workedMs: workedOf(a, at),
                     spent: plusTokens(a.spent, a.tokens),
                   } satisfies AgentRow)
@@ -437,21 +453,30 @@ export const register: Register = (on, options) => {
       const id = e.agentId
       const at = await $.clock.now()
       const status = statusOfTurn(e.reason)
-      const ending = (await read($, team)).agents.find(
-        a => a.id === id && (a.status === 'running' || a.closedByList === true),
-      )
-      const role = ending?.role
-      const endNote = e.reason === 'aborted' ? t('end.aborted') : e.reason === 'error' ? t('end.error') : undefined
+      const row = (await read($, team)).agents.find(a => a.id === id)
+      const ending = row !== undefined && (row.status === 'running' || row.closedByList === true) ? row : undefined
+      // A round whose start was missed ends like any other: its sound, and its notice when it ran long.
+      const missed = row !== undefined && isMissedRound(row, e.turnId) ? row : undefined
+      const role = (ending ?? missed)?.role
+      // StopFailure, when it came first, put the precise API error on the running row: it stays.
+      const apiError = ending?.status === 'running' ? ending.endNote : undefined
+      const endNote = e.reason === 'aborted' ? t('end.aborted') : e.reason === 'error' ? (apiError ?? t('end.error')) : undefined
       await quietly(
         update($, team, t => ({
-          ...endRow(t, id, {
-            status,
-            endedAt: at,
-            tokens,
-            endNote,
-            answer: e.reason === 'refusal' ? undefined : e.answer.slice(0, 2000),
-            ...(e.usage?.model !== undefined ? { model: e.usage.model } : {}),
-          }),
+          ...endRow(
+            t,
+            id,
+            {
+              status,
+              endedAt: at,
+              tokens,
+              endNote,
+              answer: e.reason === 'refusal' ? undefined : e.answer.slice(0, 2000),
+              turnId: e.turnId,
+              ...(e.usage?.model !== undefined ? { model: e.usage.model } : {}),
+            },
+            e.durationMs,
+          ),
           jobs: stopLeftovers(t.jobs, id, at),
         })),
       )
@@ -462,6 +487,10 @@ export const register: Register = (on, options) => {
         const what = nameOf(ending.role)
         const time = seconds(at - ending.startedAt)
         void announce($, `${t(status === 'done' ? 'notify.done' : 'notify.failed', { what, time })}: ${ending.description}`)
+      }
+      if (missed !== undefined && status !== 'stopped' && e.durationMs >= LONG_MS) {
+        const what = nameOf(missed.role)
+        void announce($, `${t(status === 'done' ? 'notify.done' : 'notify.failed', { what, time: seconds(e.durationMs) })}: ${missed.description}`)
       }
     }
 

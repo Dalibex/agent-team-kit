@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { setLanguage } from '../hooks/i18n'
-import { briefWarning, likeness, reviewWarning, shortstatLines } from '../hooks/state'
+import { briefWarning, likeness, repeatWarning, reviewWarning, shortstatLines } from '../hooks/state'
 import { boot, finish, shows, spawn, start, usage } from './support'
 
 // The pure warnings below are asserted in Spanish.
@@ -175,3 +175,38 @@ test('a heading that qualifies its word still counts, and a longer word does not
   expect(briefWarning('Goalkeeper: x\nWhyever: y')).toBe('encargo sin Goal ni Why: el agente tendrá que adivinar o explorar')
   expect(briefWarning('## Goals and whys\nx')).toBe('encargo sin Goal ni Why: el agente tendrá que adivinar o explorar')
 })
+
+test('the Spanish template words, accents and all, say nothing when two briefs are compared', () => {
+  const brief = (limit: string) => `Por qué: alfa beta\nArchivos: gamma\nHecho cuando: delta\nLímites: ${limit}`
+  const row = (id: string, prompt: string, at: number) => ({
+    id, type: 'agent-team:implementer', role: 'implementer' as const, description: id, prompt,
+    startedAt: at, endedAt: at, calls: 0, lastActiveAt: at, status: 'done' as const,
+  })
+  expect(repeatWarning([row('a1', brief('uno'), 0)], row('a2', brief('dos'), 1000))).toBeUndefined()
+  // the same brief sent again is still a repeat
+  expect(repeatWarning([row('a1', brief('uno'), 0)], row('a2', brief('uno'), 1000))).toBeDefined()
+})
+
+// ------------------------------------------------------------ a reviewer on committed work
+
+const smallDiff = (world: ReturnType<typeof boot>, ahead: number) => {
+  world.gitAnswers['git status'] = { exitCode: 0, stdout: `# branch.head feat/x\n# branch.ab +${ahead} -0\n`, stderr: '' }
+  world.gitAnswers['git diff'] = { exitCode: 0, stdout: ' 1 file changed, 2 insertions(+)\n', stderr: '' }
+  world.gitAnswers['git ls-files'] = { exitCode: 0, stdout: '', stderr: '' }
+}
+
+for (const [what, ahead, prompt] of [
+  ['a branch ahead of its upstream', 2, BRIEF],
+  ['a brief that names a commit range', 0, `${BRIEF}\nReview main..HEAD.`],
+  ['a brief that names a PR', 0, `${BRIEF}\nReview PR #12.`],
+] as const) {
+  test(`a reviewer sent on committed work (${what}) is not measured by the uncommitted lines`, async ($, on) => {
+    const world = boot(on)
+    smallDiff(world, ahead)
+    await start($)
+    await world.clock.advance(2000)
+    await spawn($, 'r1', 'agent-team:reviewer', { prompt })
+    await world.clock.advance(100)
+    expect(await shows($, 'desktop', /^⚠ revisión con Opus/)).toBe(false)
+  })
+}

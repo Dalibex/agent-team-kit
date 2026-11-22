@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 import type { SlotPicker } from '../types'
 import { reviewText } from './github'
+import { jobTitle } from './jobs'
 import { t, tn } from './i18n'
 import { kilo, levelOf, percentText, projectionOf, resetClock, roundTokens, windowShort } from './usage'
 import { choose, compactNow, copyText, createPack, deletePack, openPicker, pickerBack, pickGroup, refreshGit, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, togglePack, toggleSkillEdit, turnPage, viewAgent } from './actions'
@@ -130,7 +131,15 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const eta = projectionOf(u.trail)
   const jobRows = jobRowsOf(squad, at)
   const runningJobs = jobRows.filter(r => r.state === 'running')
-  const ci = g.pr === undefined ? undefined : ciMark(g.pr.checks)
+  // A PR that is no longer open has no live checks; a branch with no PR shows its last workflow run.
+  const ci =
+    g.pr === undefined
+      ? g.run === undefined
+        ? undefined
+        : runMark(g.run)
+      : g.pr.ended === undefined
+        ? ciMark(g.pr.checks)
+        : undefined
   const chips = [
     // A newer release of the kit: where to read it and how to get it.
     newer === null ? null : (
@@ -418,7 +427,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
     return said === undefined || said === '' ? undefined : said
   }
   const filledSlots = slotNames.filter((one): one is string => one !== null).length
-  const tipWidth = Math.max(20, Math.min(52, e.props.bodyColumns - 6))
+  const tipWidth = Math.min(e.props.bodyColumns - 2, Math.max(20, Math.min(52, e.props.bodyColumns - 6)))
 
   /** A cell of a button grid, with the full name (and what it does) shown while the pointer rests on it. */
   type Cell = { cell: RenderChildren; tip?: string; detail?: string }
@@ -514,11 +523,11 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       ]
     }
     const inGroup = choiceList.filter(c => groupOf(c.name) === p.group)
-    // In a pack, a skill another of its slots holds is marked and cannot go in twice.
+    // A skill another slot of the same list holds (a pack's, or the loose ones) is marked and cannot go in twice.
     const heldElsewhere = new Set(
-      p.pack === undefined
-        ? []
-        : (packList.find(one => one?.id === p.pack)?.skills ?? []).filter((n, i): n is string => n !== null && i !== p.slot),
+      (p.pack === undefined ? slotNames : (packList.find(one => one?.id === p.pack)?.skills ?? [])).filter(
+        (n, i): n is string => n !== null && i !== p.slot,
+      ),
     )
     const pages = Math.max(1, Math.ceil(inGroup.length / PICK_PAGE))
     const page = Math.min(p.page, pages - 1)
@@ -799,6 +808,12 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   // ------------------------------------------------------- the jobs
 
   const rows = jobRows
+  /** A row's title with what the job works on, when it is a recognised job ("maven · build · clean, install"). */
+  const titleWithTarget = (r: (typeof rows)[number]): string => {
+    const match = squad.jobs.find(j => j.id === r.id) ?? squad.shells.find(sh => sh.id === r.id)?.job
+
+    return match === undefined ? r.title : jobTitle(match)
+  }
   /** One line per job: its mark, what it is, a small bar while it runs, and how long. */
   const jobsBody = () =>
     rows.length === 0
@@ -828,7 +843,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
                 </Box>
                 <Box flexGrow={1} flexShrink={1}>
                   <Text wrap="truncate-end" bold={isRunning} dimColor={r.state === 'stopped'}>
-                    {r.title}
+                    {titleWithTarget(r)}
                   </Text>
                 </Box>
                 <Box flexShrink={0}>
@@ -865,9 +880,16 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
     const out: RenderChildren[] = []
     if (g.state === 'error') {
       out.push(
-        <Text key="git-error" color={WARN} wrap="truncate-end">
-          {t('git.error', { error: g.error ?? t('git.noAnswer') })}
-        </Text>,
+        <Box key="git-error-row" flexDirection="row" columnGap={1}>
+          <Box flexShrink={0}>
+            <Button key="git-refresh" plain dimColor label={g.isLoading ? '…' : '↻'} onPress={() => void refreshGit($, true)} />
+          </Box>
+          <Box flexGrow={1} flexShrink={1}>
+            <Text key="git-error" color={WARN} wrap="truncate-end">
+              {t('git.error', { error: g.error ?? t('git.noAnswer') })}
+            </Text>
+          </Box>
+        </Box>,
       )
     } else {
       out.push(
@@ -920,9 +942,12 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
           <Box key="git-pr" flexDirection="column">
             <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
               <Link key="pr-link" href={g.pr.url} label={`#${g.pr.number}`} />
-              {c.ok > 0 && <Text color="#4caf50">{`✓ ${c.ok}`}</Text>}
-              {c.failed > 0 && <Text color="#ff5c5c">{`✗ ${c.failed}`}</Text>}
-              {c.pending > 0 && <Text color={WARN}>{`● ${c.pending}`}</Text>}
+              {g.pr.ended !== undefined && (
+                <Text dimColor>{g.pr.ended === 'merged' ? t('pr.merged') : t('pr.closed')}</Text>
+              )}
+              {g.pr.ended === undefined && c.ok > 0 && <Text color="#4caf50">{`✓ ${c.ok}`}</Text>}
+              {g.pr.ended === undefined && c.failed > 0 && <Text color="#ff5c5c">{`✗ ${c.failed}`}</Text>}
+              {g.pr.ended === undefined && c.pending > 0 && <Text color={WARN}>{`● ${c.pending}`}</Text>}
               {review !== undefined && <Text dimColor>{review}</Text>}
             </Box>
             <Box paddingLeft={2}>
@@ -933,7 +958,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
           </Box>,
         )
         // A red check links straight to its log: what broke, one click away.
-        if (c.firstFailure !== undefined) {
+        if (g.pr.ended === undefined && c.firstFailure !== undefined) {
           out.push(
             <Box key="git-failure" flexDirection="row" flexWrap="wrap" columnGap={2}>
               <Text color="#ff5c5c" wrap="wrap">{`✗ ${c.firstFailure.name}`}</Text>
@@ -1086,25 +1111,27 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
           alt={t('alt.drawing', { title: branding.title, usage: usageAlt(u) })}
           width={width}
         />
-        <Box
-          position="absolute"
-          bottom={0}
-          right={0}
-          width={tipWidth}
-          display="none"
-          hover={{ display: 'flex' }}
-          flexDirection="column"
-          borderStyle="round"
-          borderColor={CONTEXT_COLOR}
-          backgroundColor="#1b1726"
-          paddingX={1}
-        >
-          {tips.map((tip, i) => (
-            <Text key={`drawing-tip-${i}`} dimColor={i > 0} wrap="wrap">
-              {tip}
-            </Text>
-          ))}
-        </Box>
+        {tips.length > 0 && (
+          <Box
+            position="absolute"
+            bottom={0}
+            right={0}
+            width={tipWidth}
+            display="none"
+            hover={{ display: 'flex' }}
+            flexDirection="column"
+            borderStyle="round"
+            borderColor={CONTEXT_COLOR}
+            backgroundColor="#1b1726"
+            paddingX={1}
+          >
+            {tips.map((tip, i) => (
+              <Text key={`drawing-tip-${i}`} dimColor={i > 0} wrap="wrap">
+                {tip}
+              </Text>
+            ))}
+          </Box>
+        )}
       </Box>
       {cards}
     </Box>

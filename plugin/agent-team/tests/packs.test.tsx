@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { armedBookFrom, packsFrom, pickedSkills, projectKeyOf, withArmed } from '../hooks/state'
+import { armedBookFrom, packsFrom, pickedSkills, projectKeyOf, slotsFrom, withArmed } from '../hooks/state'
 import { boot as bootAt, PANE, shows } from './support'
 
 
@@ -381,4 +381,30 @@ test('in a pack, a skill another slot holds is marked and does not go in twice',
   // the picker stays open and the pack is unchanged
   expect(await labelOf($, 'skills-choice-0')).toBe('✓ code-review')
   expect(packsFrom(world.stored.skillPacks)[0]?.skills[1]).toBeNull()
+})
+
+// ------------------------------------------------------------ v0.8.7: audit
+
+test('in the loose skills, a skill another slot holds is marked and does not go in twice', async ($, on) => {
+  const world = boot(on, { store: { skillSlots: ['code-review', null, null, null, null, null, null, null] } })
+  world.commands = COMMANDS as never
+  await startIn($, '/work')
+  await press($, 'slot-btn-1', 'skills-group-0')
+  expect(await labelOf($, 'skills-choice-0')).toBe('✓ code-review')
+  await press($, 'skills-choice-0')
+  // the picker stays open and the slot is still empty
+  expect(await labelOf($, 'skills-choice-0')).toBe('✓ code-review')
+  expect(await labelOf($, 'slot-btn-1')).toBeUndefined()
+  expect(slotsFrom(world.stored.skillSlots)[1]).toBeNull()
+})
+
+test('a slot’s card is never wider than a narrow pane', async ($, on) => {
+  const world = boot(on, { store: { skillSlots: ['code-review', null, null, null, null, null, null, null] } })
+  world.commands = COMMANDS as never
+  await startIn($, '/work')
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 16 } })
+  const cards = (await ui.findAll({ type: 'Box' })).filter(box => box.props.display === 'none' && typeof box.props.width === 'number')
+  expect(cards.length).toBeGreaterThan(0)
+  for (const card of cards) expect(Number(card.props.width)).toBeLessThanOrEqual(14)
+  await ui.unmount()
 })

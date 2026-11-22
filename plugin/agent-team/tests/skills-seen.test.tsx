@@ -1,8 +1,9 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 import { boot, finish, shows, spawn, start } from './support'
 
-const loadSkill = ($: Parameters<Parameters<typeof test>[1]>[0], skill: string, agentId?: string) =>
+const loadSkill = ($: Engine, skill: string, agentId?: string) =>
   $.tool.call({ tool: 'Skill', skill, ...(agentId === undefined ? {} : { agentId }) } as never)
 
 test("the skills Claude loads this turn show under its row, and a new turn starts clean", async ($, on) => {

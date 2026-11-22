@@ -546,3 +546,143 @@ test('two endings 400 ms apart play two clips', async ($, on) => {
 
   expect(world.clips).toEqual(['sounds/explorer.wav', 'sounds/reviewer.wav'])
 })
+
+// --------------------------------------------- engine events in orders the helpers never produce
+
+test("an agent's turn.start before its spawn resolves keeps the spawn's warning on the row", async ($, on) => {
+  const world = boot(on)
+  await start($)
+  world.listed = [{ id: 'a1', type: 'agent-team:implementer', description: 'Job a1', status: 'running' }]
+  world.onSpawn = async () => {
+    world.onSpawn = undefined
+    await $.turn.start({ text: 'Fix the login bug', turnId: 't-a1', agentId: 'a1' } as never)
+  }
+  await spawn($, 'a1', 'agent-team:implementer', { prompt: 'Fix the login bug in auth.ts' })
+
+  expect(await shows($, 'desktop', /^⚠ encargo sin Goal ni Why: el agente tendrá que adivinar o explorar$/)).toBe(true)
+})
+
+for (const order of ['StopFailure first', 'turn.complete first'] as const) {
+  test(`an agent cut by an API error keeps the precise reason, ${order}`, async ($, on) => {
+    boot(on)
+    await start($)
+    await spawn($, 'a1', 'agent-team:tester')
+    const failure = () => $.classic.StopFailure({ error: 'overloaded', agent_id: 'a1' } as never)
+    if (order === 'StopFailure first') await failure()
+    await finish($, 'a1', 'error')
+    if (order === 'turn.complete first') await failure()
+    await unfold($, 'a1')
+
+    expect(await shows($, 'desktop', /servidores saturados/)).toBe(true)
+    expect(await shows($, 'desktop', /un error de la API lo cortó/)).toBe(false)
+  })
+}
+
+test('an agent row closed by the list ends its foreground job too', async ($, on) => {
+  const world = boot(on, { store: { tab: 'jobs' } })
+  await start($)
+  await spawn($, 'a1', 'agent-team:implementer')
+  let release: () => void = () => undefined
+  world.toolResult = () =>
+    new Promise(resolve => {
+      release = () => resolve({ result: { stdout: '', stderr: '', interrupted: false } })
+    })
+  const call = $.tool.call({ tool: 'Bash', command: 'mvn package', agentId: 'a1' })
+  await world.clock.advance(1000)
+  world.listed = [{ id: 'a1', type: 'agent-team:implementer', description: 'Job a1', status: 'completed' }]
+  await world.clock.advance(16_000)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^■$/ })).toBeDefined()
+  await ui.unmount()
+  release()
+  await call
+})
+
+// ------------------------------------------------------ reads the same turn edits
+
+test('a file Claude reads to edit it does not count as a read', async ($, on) => {
+  boot(on)
+  await start($)
+  await $.turn.start({ text: 'change it', turnId: 't1' })
+  for (let n = 1; n <= 6; n += 1) await read($, n)
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/file6.ts', old_string: 'a', new_string: 'b' })
+  await $.tool.call({ tool: 'Write', file_path: '/repo/src/new.ts', content: 'x' })
+  await $.tool.call({ tool: 'Read', file_path: '/repo/src/new.ts' })
+
+  for (const surface of SURFACES) {
+    expect(await shows($, surface, /ficheros leídos sin el explorer/)).toBe(false)
+  }
+})
+
+// ------------------------------------------------------ the skill slots across windows
+
+test('filling a slot keeps the slots another window filled meanwhile', async ($, on) => {
+  const world = boot(on, { store: { tab: 'skills', skillSlots: ['code-review', null, null, null, null, null, null, null] } })
+  world.commands = [{ name: 'code-review', description: 'Reviews', source: 'user' }, { name: 'lint', description: 'Lints', source: 'user' }, { name: 'tidy', description: 'Tidies', source: 'user' }] as never
+  await start($)
+  const press = async (key: string): Promise<void> => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    await ui.press({ key })
+    await ui.unmount()
+  }
+  await press('skills-loose')
+  // another window puts a skill in slot 2 meanwhile
+  world.stored.skillSlots = ['code-review', 'tidy', null, null, null, null, null, null]
+  await press('slot-btn-2')
+  await press('skills-group-0')
+  await press('skills-choice-1')
+
+  expect(world.stored.skillSlots).toEqual(['code-review', 'tidy', 'lint', null, null, null, null, null])
+})
+
+/** The skills tab of the loose slots, with three skills to pick from; `slots` seeds the store. */
+const looseSlots = async ($: Engine, on: Parameters<typeof boot>[0], slots: (string | null)[]) => {
+  const world = boot(on, { store: { tab: 'skills', skillSlots: slots } })
+  world.commands = [
+    { name: 'code-review', description: 'Reviews', source: 'user' },
+    { name: 'lint', description: 'Lints', source: 'user' },
+    { name: 'tidy', description: 'Tidies', source: 'user' },
+  ] as never
+  await start($)
+  const press = async (...keys: string[]): Promise<void> => {
+    for (const key of keys) {
+      const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+      await ui.press({ key })
+      await ui.unmount()
+    }
+  }
+  await press('skills-loose')
+
+  return { world, press }
+}
+
+test('two slots filled while the store answers late both stay filled', async ($, on) => {
+  const { world, press } = await looseSlots($, on, ['code-review', null, null, null, null, null, null, null])
+  let release: () => void = () => undefined
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  world.onStoreGet = key => {
+    if (key !== 'skillSlots') return undefined
+    world.onStoreGet = undefined
+
+    return gate
+  }
+  // the first fill waits on the store; the second is pressed meanwhile
+  await press('slot-btn-1', 'skills-group-0', 'skills-choice-1')
+  await press('skills-back', 'skills-back', 'slot-btn-2', 'skills-group-0', 'skills-choice-2')
+  release()
+  await world.clock.settle()
+
+  expect(world.stored.skillSlots).toEqual(['code-review', 'lint', 'tidy', null, null, null, null, null])
+})
+
+test('a skill another window put in a slot meanwhile does not go in a second one', async ($, on) => {
+  const { world, press } = await looseSlots($, on, ['code-review', null, null, null, null, null, null, null])
+  world.stored.skillSlots = ['code-review', 'lint', null, null, null, null, null, null]
+  await press('slot-btn-2', 'skills-group-0', 'skills-choice-1')
+
+  expect(world.stored.skillSlots).toEqual(['code-review', 'lint', null, null, null, null, null, null])
+})

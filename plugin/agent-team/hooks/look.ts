@@ -226,8 +226,8 @@ const plates = new Map<string, TitlePlate>()
 
 /**
  * A card's title in the drawing's own style: the word in neon pixel letters
- * of the card's colour, and a star that twinkles beside it. Drawn as a plain
- * image (no frame), so four of them cost next to nothing.
+ * of the card's colour. Drawn as a plain image (no frame), so four of them
+ * cost next to nothing.
  */
 export const titlePlate = (word: string, color: string): TitlePlate => {
   const key = `${word}|${color}`
@@ -235,14 +235,13 @@ export const titlePlate = (word: string, color: string): TitlePlate => {
   if (kept !== undefined) return kept
   const p = 2.4
   const height = 24
-  const width = Math.ceil(wordWidth(word, p)) + 26
+  const width = Math.ceil(wordWidth(word, p)) + 8
   const y = (height - 7 * p) / 2
   const source =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">` +
     '<defs><filter id="dx-glow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="1.6" result="b"/>' +
     '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>' +
     neonTint(word, 3, y, p, color) +
-    twinkle(width - 10, height / 2, 5, '#ffd166', 2.6, 0.4) +
     '</svg>'
   const plate = { source, width, height }
   plates.set(key, plate)

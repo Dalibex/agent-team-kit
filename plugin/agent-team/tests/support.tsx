@@ -20,7 +20,7 @@ export const PANE = {
 export const SPANISH = { LANG: 'es_ES.UTF-8' } as const
 
 /** The version the mocked manifest (`.claude-plugin/plugin.json`) states: the one "running". */
-export const MANIFEST_VERSION = '0.8.6'
+export const MANIFEST_VERSION = '0.8.7'
 
 /**
  * A path as the tests name it: forward slashes and no drive. The engine hands a
@@ -31,7 +31,7 @@ export const plainPath = (path: string): string => {
   // On Linux the engine reads a Windows path as relative and prefixes the plugin folder: what follows the drive is the path.
   const drive = slashed.match(/(?:^|\/)[A-Za-z]:(\/.*)$/)
 
-  return drive ? drive[1] : slashed
+  return drive?.[1] ?? slashed
 }
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -69,6 +69,8 @@ export type World = {
   runs: { argv: readonly string[]; init: ProcessRunInit | undefined }[]
   /** The argv of each git or gh run, joined by spaces. */
   gitRuns: string[]
+  /** The init (env, timeout) each git or gh run carried, in step with `gitRuns`. */
+  gitInits: (ProcessRunInit | undefined)[]
   /**
    * What git and gh answer, by their first two words ("git status", "gh pr");
    * one not listed answers as outside a repository.
@@ -76,6 +78,12 @@ export type World = {
   gitAnswers: Record<string, ProcessAnswer>
   /** Runs inside each `$.agent.list()`, before it answers: a call that lands while the list is taken. */
   onList: (() => Promise<void>) | undefined
+  /** Runs inside each spawn, before the engine answers it: an agent's own event that lands before the spawn resolves. */
+  onSpawn: (() => Promise<void>) | undefined
+  /** Runs inside each `$.store.get`, the value already read: a store that answers late, with what it held when asked. */
+  onStoreGet: ((key: string) => Promise<void> | undefined) | undefined
+  /** Each `$.ui.log` text, in order, whatever its sink. */
+  logs: string[]
   /** The asset of each `$.audio.play`. */
   clips: (string | undefined)[]
   /** Each `$.ui.toast` text, in order. */
@@ -149,8 +157,12 @@ export const boot = (
     statuses: [],
     runs: [],
     gitRuns: [],
+    gitInits: [],
     gitAnswers: {},
     onList: undefined,
+    onSpawn: undefined,
+    onStoreGet: undefined,
+    logs: [],
     clips: [],
     toasts: [],
     files: { '.claude-plugin/plugin.json': JSON.stringify({ name: 'agent-team', version: MANIFEST_VERSION }) },
@@ -173,7 +185,12 @@ export const boot = (
     root: '/',
   }
   // The store as a plain record the test can read back after the plugin writes.
-  on('store.get', (_, e) => ({ value: world.stored[e.key] }))
+  on('store.get', async (_, e) => {
+    const value = world.stored[e.key]
+    await world.onStoreGet?.(e.key)
+
+    return { value }
+  })
   on('store.set', (_, e) => {
     world.stored[e.key] = e.value
 
@@ -222,10 +239,16 @@ export const boot = (
   })
   // The tool_use_id of a spawn is the id of the agent it starts; with no model
   // asked for, the parent's is what the engine resolves.
-  on('agent.spawn', (_, e) => {
+  on('agent.spawn', async (_, e) => {
     world.spawned.push(e)
+    await world.onSpawn?.()
 
     return { agentId: e.tool_use_id, model: e.model ?? e.parentModel }
+  })
+  on('ui.log', (_, e) => {
+    world.logs.push(e.text)
+
+    return { value: undefined }
   })
   on('tool.call', async (_, e) => (await world.toolResult?.(e)) ?? { result: { stdout: '', stderr: '', interrupted: false } })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
@@ -236,6 +259,7 @@ export const boot = (
     const done = { isStdoutTruncated: false, isStderrTruncated: false }
     if (e.argv[0] === 'git' || e.argv[0] === 'gh') {
       world.gitRuns.push(e.argv.join(' '))
+      world.gitInits.push(e.init)
       const answer = world.gitAnswers[e.argv.slice(0, 2).join(' ')] ?? OUTSIDE_REPO
 
       return { value: { ...answer, ...done } }

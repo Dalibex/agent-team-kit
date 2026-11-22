@@ -139,6 +139,24 @@ test('legacy text outside a marked block does not stop the block from being kept
 
 /** SHA-256 of `RULES_TEXT` in v0.8.4 (`git show v0.8.4:plugin/agent-team/hooks/rules.ts`). */
 const RULES_0_8_4_SHA256 = '39647f936bfd5fb300fc0cff5fd5ab29c3b238667969cbcca722d099d6f0b13b'
+/** SHA-256 of `RULES_TEXT` as v0.8.5 and v0.8.6 shipped it (the same text in both). */
+const RULES_0_8_6_SHA256 = '855783d7ffe4eab7532fcfc6aa50ca80134f1a139afdf95425922deebd4db95f'
+
+const sha256 = async (text: string): Promise<string> =>
+  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+
+test('the rules text 0.8.6 shipped is still current, or kept in SHIPPED_BEFORE', async () => {
+  if ((await sha256(RULES_TEXT)) === RULES_0_8_6_SHA256) return
+  const digests = await Promise.all(SHIPPED_BEFORE.map(sha256))
+  if (!digests.includes(RULES_0_8_6_SHA256)) {
+    throw new Error(
+      'RULES_TEXT changed: add the text 0.8.6 shipped (git show v0.8.6:plugin/agent-team/hooks/rules.ts) to SHIPPED_BEFORE in hooks/rules.ts, ' +
+        'so the blocks it wrote are replaced without a warning; then pin the new RULES_TEXT here.',
+    )
+  }
+})
 
 // ------------------------------------------------- 9. a block the person edited
 

@@ -1,6 +1,6 @@
 {
   "name": "agent-team",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "description": "An all-in-one pane: the main Claude and its agents as pixel sprites, usage limits (5 h with its projection, weekly, context), per-role token spend, installs and builds, skill packs and loose skills kept per project, the repository's GitHub state, in tabs; plus the four team agents (explorer, implementer, tester, reviewer) with project context in every brief.",
   "types": "./types/index.d.ts",
   "license": "MIT",
@@ -29,7 +29,7 @@
     "sessionLog": {
       "type": "boolean",
       "title": "Session log",
-      "description": "When a session that used the team ends, append a summary of its agents to agent-team/runs.md in the Claude config folder. Turn off to write nothing.",
+      "description": "When a session that used the team ends, write a summary of its agents to a file of its own in agent-team/runs/ in the Claude config folder. Turn off to write nothing.",
       "default": true
     }
   }

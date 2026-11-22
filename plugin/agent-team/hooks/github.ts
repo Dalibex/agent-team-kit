@@ -20,8 +20,10 @@ export const NO_GIT: GitInfo = {
 /** git answers at once; gh goes to the network, so it gets longer. */
 const GIT_TIMEOUT_MS = 5_000
 const GH_TIMEOUT_MS = 15_000
+/** git's messages in English, whatever the person's language: the one we read is its "not a repository". */
+const GIT_ENV = { LC_ALL: 'C', LANGUAGE: 'C' }
 /** The fields `gh pr status` is asked for: what the GitHub card draws, nothing more. */
-const PR_FIELDS = 'number,title,url,isDraft,reviewDecision,statusCheckRollup'
+const PR_FIELDS = 'number,title,url,isDraft,reviewDecision,statusCheckRollup,state'
 const RUN_FIELDS = 'workflowName,status,conclusion,url'
 
 /** What `git status --porcelain=v2 --branch` says: the branch, ahead/behind and changed files. */
@@ -58,12 +60,25 @@ type Rollup = {
   conclusion?: string
   state?: string
   name?: string
+  /** The workflow a check run belongs to: two workflows may each have a job of the same name. */
+  workflowName?: string
   context?: string
   startedAt?: string
   /** A check run's log page. */
   detailsUrl?: string
   /** A commit status's page. */
   targetUrl?: string
+}
+
+/**
+ * When a check started, as text that sorts: gh writes a start that has not
+ * happened as empty or as the year 1, and a check still to run is the newest.
+ */
+const startedKey = (check: Rollup): string => {
+  const at = check.startedAt ?? ''
+  const isDone = check.status === undefined || check.status.toUpperCase() === 'COMPLETED'
+
+  return !isDone && (at === '' || at.startsWith('0001-')) ? '￿' : at
 }
 
 /**
@@ -74,15 +89,20 @@ type Rollup = {
 export const checksOf = (rollup: readonly Rollup[] | undefined): Checks => {
   const latest = new Map<string, Rollup>()
   for (const check of rollup ?? []) {
-    const name = check.name ?? check.context ?? String(latest.size)
-    const before = latest.get(name)
-    if (before === undefined || (check.startedAt ?? '') >= (before.startedAt ?? '')) latest.set(name, check)
+    const key = `${check.workflowName ?? ''}/${check.name ?? check.context ?? String(latest.size)}`
+    const before = latest.get(key)
+    if (before === undefined || startedKey(check) >= startedKey(before)) latest.set(key, check)
   }
   const checks: Checks = { ok: 0, failed: 0, pending: 0 }
-  for (const [name, check] of latest) {
+  for (const check of latest.values()) {
+    const name = check.name ?? check.context ?? ''
     const verdict = (check.conclusion ?? check.state ?? '').toUpperCase()
     const isDone = check.status === undefined || check.status.toUpperCase() === 'COMPLETED'
-    if (!isDone || verdict === '' || verdict === 'PENDING' || verdict === 'EXPECTED') checks.pending += 1
+    if (verdict === 'EXPECTED') {
+      // GitHub waits to hear of it: pending for the card, but nothing is running.
+      checks.pending += 1
+      checks.waiting = (checks.waiting ?? 0) + 1
+    } else if (!isDone || verdict === '' || verdict === 'PENDING') checks.pending += 1
     else if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(verdict)) checks.ok += 1
     else {
       checks.failed += 1
@@ -100,6 +120,7 @@ type PrJson = {
   url: string
   isDraft?: boolean
   reviewDecision?: string
+  state?: string
   statusCheckRollup?: Rollup[]
 }
 
@@ -121,6 +142,11 @@ export const parsePrStatus = (stdout: string): Pick<GitInfo, 'pr' | 'reviewReque
             isDraft: current.isDraft === true,
             review: current.reviewDecision ?? '',
             checks: checksOf(current.statusCheckRollup),
+            stamp: (current.statusCheckRollup ?? [])
+              .map(c => `${c.workflowName ?? ''}/${c.name ?? c.context ?? ''}:${c.status ?? ''}:${c.conclusion ?? c.state ?? ''}`)
+              .sort()
+              .join(' '),
+            ...(current.state === 'MERGED' ? { ended: 'merged' as const } : current.state === 'CLOSED' ? { ended: 'closed' as const } : {}),
           },
         }),
   }
@@ -138,14 +164,46 @@ export const parseRun = (stdout: string): GitInfo['run'] => {
 
 /** Whether GitHub still has work running: a check or the branch's last run. */
 export const isCiRunning = (git: GitInfo): boolean =>
-  (git.pr?.checks.pending ?? 0) > 0 || (git.pr === undefined && git.run !== undefined && git.run.status !== 'completed')
+  git.pr === undefined
+    ? git.run !== undefined && git.run.status !== 'completed'
+    : git.pr.ended === undefined && git.pr.checks.pending - (git.pr.checks.waiting ?? 0) > 0
+
+const MINUTE_MS = 60 * 1000
+
+/**
+ * How long to wait before asking GitHub again while CI runs: two minutes at
+ * first, then five and ten as nothing changes, and none after an hour without
+ * change (a check stuck queued or waiting); a check in progress is kept for six hours. Undefined when there is nothing to poll.
+ */
+export const ciPollMs = (git: GitInfo): number | undefined => {
+  if (!isCiRunning(git)) return undefined
+  const age = git.remoteAt - (git.ciChangedAt ?? git.remoteAt)
+
+  if (age < 10 * MINUTE_MS) return 2 * MINUTE_MS
+  if (age < 30 * MINUTE_MS) return 5 * MINUTE_MS
+  if (age < 60 * MINUTE_MS) return 10 * MINUTE_MS
+  // A job that is really running may take hours; one queued or waiting for an hour is stuck.
+  return isInProgress(git) && age < 6 * 60 * MINUTE_MS ? 10 * MINUTE_MS : undefined
+}
+
+/** Whether a check (or the branch's run) is actually executing, not queued or waiting. */
+const isInProgress = (git: GitInfo): boolean =>
+  git.pr === undefined ? git.run?.status === 'in_progress' : /:IN_PROGRESS:/i.test(git.pr.stamp ?? '')
+
+/** What CI looked like at a read, to tell whether the next read found it changed. */
+const ciSignature = (git: GitInfo): string =>
+  git.pr === undefined
+    ? git.run === undefined
+      ? ''
+      : `run ${git.run.url} ${git.run.status} ${git.run.conclusion}`
+    : `pr ${git.pr.number} ${git.pr.ended ?? ''} ${git.pr.checks.ok}/${git.pr.checks.failed}/${git.pr.checks.pending}/${git.pr.checks.waiting ?? 0} ${git.pr.stamp ?? ''}`
 
 /**
  * Whether the CI that was running at one read has finished at the next, on
  * the same PR or the same workflow run, and how: for a toast and a sound.
  */
 export const ciFinished = (before: GitInfo, after: GitInfo): { isOk: boolean; text: string } | undefined => {
-  if (after.state !== 'ok' || !isCiRunning(before) || isCiRunning(after)) return undefined
+  if (after.state !== 'ok' || !isCiRunning(before) || isCiRunning(after) || after.pr?.ended !== undefined) return undefined
   if (before.pr !== undefined && after.pr !== undefined && before.pr.number === after.pr.number) {
     const { ok, failed } = after.pr.checks
 
@@ -191,12 +249,13 @@ export async function readGit($: EngineInterface, before: GitInfo, withRemote: b
   const at = await $.clock.now()
   let status
   try {
-    status = await $.process.run(['git', 'status', '--porcelain=v2', '--branch'], { timeoutMs: GIT_TIMEOUT_MS })
+    status = await $.process.run(['git', 'status', '--porcelain=v2', '--branch'], { timeoutMs: GIT_TIMEOUT_MS, env: GIT_ENV })
   } catch {
     return { ...before, state: 'error', error: t('git.missing'), at, isLoading: false }
   }
   if (status.exitCode !== 0) {
-    const isOutside = /not a git repository/i.test(status.stderr)
+    // The messages are asked for in English; the Spanish one is still read, should git ignore the request.
+    const isOutside = /not a git repository|no es un repositorio/i.test(status.stderr)
 
     return {
       ...NO_GIT,
@@ -208,7 +267,7 @@ export async function readGit($: EngineInterface, before: GitInfo, withRemote: b
   }
   const local = parseStatus(status.stdout)
   const remote = await $.process
-    .run(['git', 'remote', 'get-url', 'origin'], { timeoutMs: GIT_TIMEOUT_MS })
+    .run(['git', 'remote', 'get-url', 'origin'], { timeoutMs: GIT_TIMEOUT_MS, env: GIT_ENV })
     .then(r => (r.exitCode === 0 ? repoOf(r.stdout) : undefined))
     .catch(() => undefined)
   const sameBranch = before.branch === local.branch && before.detached === local.detached && before.repo === remote
@@ -239,7 +298,11 @@ export async function readGit($: EngineInterface, before: GitInfo, withRemote: b
     const pr = parsePrStatus(prs.stdout)
     const run = runs !== undefined && runs.exitCode === 0 ? parseRun(runs.stdout) : undefined
 
-    return { ...kept, ...pr, pr: pr.pr, run, remoteAt: at, remoteError: undefined }
+    const read: GitInfo = { ...kept, ...pr, pr: pr.pr, run, remoteAt: at, remoteError: undefined }
+    // The backoff counts from the last time CI looked different.
+    const isSame = sameBranch && before.ciChangedAt !== undefined && ciSignature(before) === ciSignature(read)
+
+    return { ...read, ciChangedAt: isSame ? before.ciChangedAt : at }
   } catch {
     return { ...kept, remoteAt: at, remoteError: t('gh.missing') }
   }

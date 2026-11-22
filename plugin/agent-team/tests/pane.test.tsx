@@ -94,7 +94,7 @@ test('a background shell closes when its task notification arrives', async ($, o
   await clock.advance(5000)
 
   let ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /^maven · build$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^maven · build · verify$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: SPIN })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^5s$/ })).toBeDefined()
   await ui.unmount()
@@ -154,7 +154,7 @@ test('a TaskStop by the deprecated shell_id closes the shell; a failed one leave
       ? e.shell_id === 'bg-41'
         ? { result: { message: 'Stopped', task_id: '', task_type: 'local_bash' } }
         : { isError: true, result: 'No task found', text: 'No task found' }
-      : { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: e.description === 'First' ? 'bg-41' : 'bg-42' } },
+      : { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: (e as { description?: string }).description === 'First' ? 'bg-41' : 'bg-42' } },
   )
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -448,7 +448,7 @@ test("an agent's background shell shows its owner and closes from the agent's lo
   let ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   // the owner shows in the mark's colour: the implementer's blue
   expect((await ui.find({ type: 'Text', text: SPIN }))?.props.color).toBe('#5b8def')
-  expect(await ui.find({ type: 'Text', text: /^maven · build$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^maven · build · test$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: SPIN })).toBeDefined()
   await ui.unmount()
 

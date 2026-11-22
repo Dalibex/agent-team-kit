@@ -4,6 +4,29 @@ import { t } from './i18n'
 /** What the pane calls each kind of job, in the pane's language. */
 export const kindText = (kind: JobKind): string => t(`job.${kind}`)
 
+/** A job's row title: the tool, the kind of job and what it works on ("maven · build · clean, install"). */
+export const jobTitle = (job: JobMatch): string => {
+  const kind = kindText(job.kind)
+  const fallbacks = FALLBACK_TARGETS.map(key => t(key))
+  // A target that only says the kind again ("build · build") or a rule's stand-in for "no target named" adds nothing.
+  const isEcho = job.target === job.kind || job.target === kind || fallbacks.includes(job.target)
+
+  return isEcho ? `${job.manager} · ${kind}` : `${job.manager} · ${kind} · ${job.target}`
+}
+
+/** The words a rule puts as the target when the command names none. */
+const FALLBACK_TARGETS = [
+  'job.target.project',
+  'job.target.packages',
+  'job.target.crates',
+  'job.target.modules',
+  'job.target.nuget',
+  'job.target.image',
+  'job.target.repository',
+  'job.target.download',
+  'job.target.file',
+] as const
+
 /** The words of a command that are not flags, quotes stripped. */
 const argsOf = (rest: string): string[] =>
   rest
@@ -28,9 +51,21 @@ const lastPart = (text: string): string =>
     .filter(part => part !== '')
     .pop() ?? text
 
-type Rule = { re: RegExp; match: (m: RegExpExecArray) => JobMatch }
+/** A rule that knows the command is not a job (a server, a watcher) answers undefined. */
+type Rule = { re: RegExp; match: (m: RegExpExecArray) => JobMatch | undefined }
 
-const NODE = '(npm|pnpm|yarn|bun)'
+const NODE = '(npm|pnpm|yarn|bun)(?:\\.cmd)?'
+
+/** A build that never ends: a watch flag (`-w` only after `--`, where npm hands flags on). */
+const isWatching = (rest: string): boolean =>
+  /(?:^|\s)(?:--watch|--watchAll|--continuous)(?=\s|$|=(?!false\b|0\b))/.test(rest) || /\s--(?:\s|\s.*\s)-w(?=\s|$)/.test(` ${rest}`)
+
+/** A dev server a build tool runs in the foreground: it ends only when it is stopped. */
+const MAVEN_SERVER = /(?:^|\s)[\w.-]+:(?:run|dev)(?=\s|$)/
+const GRADLE_SERVER = /(?:^|\s)(?:bootRun|bootTestRun|quarkusDev)(?=\s|$)|(?:^|\s)(?:--continuous|-t)(?=\s|$)/
+
+/** Where a curl or iwr writes its body when it only checks that a server answers. */
+const NULL_SINK = /(?:^|\s)(?:-o|--output|-OutFile)[\s=]+["']?(?:\/dev\/null|nul|\$null)["']?(?=\s|$)/i
 const MAVEN = '(?:\\.[\\\\/])?(mvnw?(?:\\.cmd)?)'
 const GRADLE = '(?:\\.[\\\\/])?(gradlew?(?:\\.bat)?)'
 
@@ -41,18 +76,23 @@ const GRADLE = '(?:\\.[\\\\/])?(gradlew?(?:\\.bat)?)'
 const RULES: Rule[] = [
   {
     re: new RegExp(`^${MAVEN}\\b(.*)$`, 'i'),
-    match: m => ({ kind: 'build', manager: 'maven', target: listOf(argsOf(m[2] ?? ''), 'build') }),
+    match: m =>
+      MAVEN_SERVER.test(m[2] ?? '') ? undefined : { kind: 'build', manager: 'maven', target: listOf(argsOf(m[2] ?? ''), 'build') },
   },
   {
     re: new RegExp(`^${GRADLE}\\b(.*)$`, 'i'),
-    match: m => ({ kind: 'build', manager: 'gradle', target: listOf(argsOf(m[2] ?? ''), 'build') }),
+    match: m =>
+      GRADLE_SERVER.test(m[2] ?? '') ? undefined : { kind: 'build', manager: 'gradle', target: listOf(argsOf(m[2] ?? ''), 'build') },
   },
   {
-    re: new RegExp(`^${NODE}\\s+(?:run\\s+)?(build|test|lint|typecheck|check|e2e)\\b`, 'i'),
-    match: m => ({ kind: 'build', manager: (m[1] ?? 'npm').toLowerCase(), target: (m[2] ?? 'build').toLowerCase() }),
+    re: new RegExp(`^${NODE}\\s+(?:run\\s+)?(build|test|lint|typecheck|check|e2e)\\b(.*)$`, 'i'),
+    match: m =>
+      isWatching(m[3] ?? '')
+        ? undefined
+        : { kind: 'build', manager: (m[1] ?? 'npm').toLowerCase(), target: (m[2] ?? 'build').toLowerCase() },
   },
   {
-    re: /^npx\s+expo\s+install\b(.*)$/i,
+    re: /^npx(?:\.cmd)?\s+expo\s+install\b(.*)$/i,
     match: m => ({ kind: 'install', manager: 'expo', target: listOf(argsOf(m[1] ?? ''), t('job.target.project')) }),
   },
   {
@@ -63,7 +103,7 @@ const RULES: Rule[] = [
       target: listOf(argsOf(m[3] ?? ''), t('job.target.project')),
     }),
   },
-  { re: /^yarn\s*$/i, match: () => ({ kind: 'install', manager: 'yarn', target: t('job.target.project') }) },
+  { re: /^yarn(?:\.cmd)?\s*$/i, match: () => ({ kind: 'install', manager: 'yarn', target: t('job.target.project') }) },
   {
     re: /^(?:(?:python3?|py)(?:\s+-\d(?:\.\d+)?)?\s+-m\s+pip|pip3?|uv\s+pip)\s+install\b(.*)$/i,
     match: m => ({ kind: 'install', manager: 'pip', target: listOf(argsOf(m[1] ?? ''), t('job.target.project')) }),
@@ -116,18 +156,21 @@ const RULES: Rule[] = [
     re: /^(Install-Module|Install-Package)\b(.*)$/i,
     match: m => ({ kind: 'install', manager: 'powershell', target: listOf(argsOf(m[2] ?? ''), t('job.target.modules')) }),
   },
-  { re: /^(?:python3?\s+-m\s+)?pytest\b/i, match: () => ({ kind: 'build', manager: 'pytest', target: 'tests' }) },
+  { re: /^(?:(?:python3?|py)\s+-m\s+)?pytest\b/i, match: () => ({ kind: 'build', manager: 'pytest', target: 'tests' }) },
   {
     re: /^docker\s+(?:buildx\s+)?build\b(.*)$/i,
     match: () => ({ kind: 'build', manager: 'docker', target: t('job.target.image') }),
   },
   {
-    re: /^docker(?:\s+|-)compose\b.*\b(up|build|pull)\b/i,
-    match: m => ({
-      kind: (m[1] ?? '').toLowerCase() === 'pull' ? 'download' : 'build',
-      manager: 'compose',
-      target: (m[1] ?? 'up').toLowerCase(),
-    }),
+    // The subcommand sits right after compose's own options: an `up` inside `exec ... sh -c "...up"` is not it.
+    re: /^docker(?:\s+|-)compose(?:\s+(?:-f|--file|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--parallel|--progress)(?:=|\s+)\S+|\s+-{1,2}[\w-]+(?:=\S+)?)*\s+(up|build|pull)\b(.*)$/i,
+    match: m => {
+      const sub = (m[1] ?? 'up').toLowerCase()
+      // Attached, `up` runs the stack until it is stopped; only a detached one comes back.
+      if (sub === 'up' && !/(?:^|\s)(?:-d|--detach|--wait)(?=\s|$)/.test(m[2] ?? '')) return undefined
+
+      return { kind: sub === 'pull' ? 'download' : 'build', manager: 'compose', target: sub }
+    },
   },
   {
     re: /^docker\s+pull\b(.*)$/i,
@@ -145,7 +188,7 @@ const RULES: Rule[] = [
   {
     // only a download that saves a file: a curl that prints an API answer is not one
     re: /^(curl|Invoke-WebRequest|iwr)\b(?=.*\s(?:-o|-O|--output|--remote-name|-OutFile)\b)(.*)$/i,
-    match: m => download((m[1] ?? 'curl').toLowerCase(), m[2] ?? ''),
+    match: m => (NULL_SINK.test(m[2] ?? '') ? undefined : download((m[1] ?? 'curl').toLowerCase(), m[2] ?? '')),
   },
 ]
 
@@ -169,7 +212,12 @@ export const classify = (command: string): JobMatch | undefined => {
   for (const part of parts) {
     for (const rule of RULES) {
       const m = rule.re.exec(part)
-      if (m !== null) return rule.match(m)
+      if (m !== null) {
+        const job = rule.match(m)
+        if (job !== undefined) return job
+        // The part is job-shaped but does not end (a server, a watcher): no later rule reads it.
+        break
+      }
     }
   }
 
@@ -195,8 +243,9 @@ export const progressOf = (text: string): number | undefined => {
   const lastPercent = percents[percents.length - 1]?.[1]
   const steps = [...tail.matchAll(/[[(](\d+)\s*(?:\/|of|de)\s*(\d+)[\])]/g)]
   const lastStep = steps[steps.length - 1]
-  const percentAt = lastPercent === undefined ? -1 : tail.lastIndexOf(lastPercent)
-  const stepAt = lastStep === undefined ? -1 : tail.lastIndexOf(lastStep[0])
+  // Where each sits is where its own match is: the same digits may show up earlier in the text.
+  const percentAt = percents[percents.length - 1]?.index ?? -1
+  const stepAt = lastStep?.index ?? -1
   if (percentAt >= 0 && percentAt >= stepAt) {
     const value = Number((lastPercent ?? '').replace(',', '.'))
 
