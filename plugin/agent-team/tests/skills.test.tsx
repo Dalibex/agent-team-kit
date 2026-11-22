@@ -1,4 +1,5 @@
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
+import { test } from './support'
 import type { Engine } from 'claude-code/testing'
 
 import { boot as bootAt, PANE, shows, start as startAt } from './support'

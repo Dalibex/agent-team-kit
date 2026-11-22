@@ -1,4 +1,5 @@
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
+import { test } from './support'
 
 import { checksOf, ciFinished, ciPollMs, isCiRunning, NO_GIT, parsePrStatus, parseStatus, repoOf } from '../hooks/github'
 import { setLanguage } from '../hooks/i18n'

@@ -1,4 +1,5 @@
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
+import { test } from './support'
 import type { Engine } from 'claude-code/testing'
 
 import { findRules, planInstall, planRemove, RULES_END, RULES_START, RULES_TEXT, rulesBlock } from '../hooks/rules'

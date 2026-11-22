@@ -1,4 +1,5 @@
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
+import { test } from './support'
 
 import { setLanguage } from '../hooks/i18n'
 import { briefWarning, likeness, repeatWarning, reviewWarning, shortstatLines } from '../hooks/state'

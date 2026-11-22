@@ -1,4 +1,5 @@
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
+import { test } from './support'
 import type { Engine } from 'claude-code/testing'
 
 import { DEFAULT_MODELS, MODELS_KEY, MODELS_SHAPE, TEAM_DELEGATION, chosenFor, isCostlier, isCostliest, modelsFrom, teamDelegation, withTeamDelegation } from '../hooks/state'
