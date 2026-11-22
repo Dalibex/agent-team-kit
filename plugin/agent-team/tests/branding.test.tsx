@@ -1,4 +1,5 @@
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
+import { test } from './support'
 import type { Engine } from 'claude-code/testing'
 
 import { AGENT_TEAM_COMMAND, PANE, SURFACES, boot, shows, spawn, start } from './support'

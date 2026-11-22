@@ -1,6 +1,24 @@
-import { mock } from 'claude-code/testing'
+import { mock, test as engineTest } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, AgentSpawnInput, CommandInfo, EngineInterface, HttpInit, HttpResponse, On, ProcessRunInit, ToolCallResult } from 'claude-code'
+
+/**
+ * How long one test may run: the engine's 5 s default was tight on GitHub's
+ * runners, where a test that takes 3 s here sometimes passed 5 s and failed CI
+ * with nothing wrong. A hang still fails, a little later.
+ */
+export const TEST_MS = 20_000
+
+/** The engine's `test`, with TEST_MS as its time unless the test names its own. */
+export const test = (name: string, ...rest: Parameters<typeof engineTest> extends [string, ...infer R] ? R : never): void => {
+  const [first, second] = rest as unknown[]
+  if (second === undefined) {
+    engineTest(name, { timeoutMs: TEST_MS }, first as never)
+
+    return
+  }
+  engineTest(name, { timeoutMs: TEST_MS, ...(first as object) }, second as never)
+}
 
 export const PANE = {
   plugin: 'agent-team',
