@@ -6,6 +6,29 @@ All notable changes to agent-team-kit. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-22
+
+### Added
+
+- A **Usage** tab with where the session's tokens go, in tokens only: input,
+  output, the share read from cache, turns and compactions; the context
+  window by category with the skills grouped by plugin, the MCP tools by
+  server, each memory file and each custom agent; Claude against each role
+  of the team, the tools whose results added the most tokens and the turns
+  with the most tokens. It reads the engine's own estimates, calls no model,
+  and refreshes at the end of Claude's turns only while the tab is shown.
+- Claude's sprite reacts to what it does: it breathes and blinks when idle,
+  shows a thought bubble while it thinks, an icon of the tool it is using
+  (reading, editing, a shell, a search, the web), leans toward the agent it
+  delegates to, and shows a check when its turn ends or shakes on an API
+  error.
+
+### Changed
+
+- The session's token line moved from the Team tab to the Usage tab.
+- The drawing runs fewer animations at rest: one "z" per empty slot, and the
+  sprites hold still after a minute with nothing happening.
+
 ## [0.8.7] - 2026-11-22
 
 ### Added
