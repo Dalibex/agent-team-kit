@@ -147,8 +147,8 @@ test('a running tool shows the icon of its kind, and none while Claude is not in
     ['Read', 'Edit', 'Bash', 'Grep', 'WebFetch', 'TodoWrite'].map(tool => drawTeam(working({ lastTool: tool }), AT, USAGE)),
   )
   expect(pictures.size).toBe(6)
-  // the icon pops in once
-  expect(drawTeam(working({ lastTool: 'Read' }), AT, USAGE)).toContain('values="0;1.18;1"')
+  // the icon is static: no pop-in scale animation
+  expect(drawTeam(working({ lastTool: 'Read' }), AT, USAGE)).not.toContain('1.18')
   expect(drawTeam(team({ lastTool: 'Read' }), AT, USAGE)).not.toContain('dx-tool-')
 })
 
@@ -175,17 +175,14 @@ test('tool calls of the same kind, and their count, do not change the markup', a
 
 // ------------------------------------------------------------ the hand-off
 
-test('Claude leans towards the slot it just sent work to, once, and only during the out pulse', async () => {
-  const sent = agent({ startedAt: AT - 500 })
-  const svg = drawTeam(working({}, [sent]), AT, USAGE)
-
-  expect(svg).toMatch(/values="0 0;-?[0-9.]+ -2;0 0" keyTimes="0;0\.4;1" dur="0\.6s"\/>/)
-  expect(drawTeam(working({}, [{ ...sent, startedAt: AT - 5000 }]), AT, USAGE)).not.toContain('keyTimes="0;0.4;1"')
-  // towards the right for a slot at the right of the lead, to the left for one at its left
-  const lean = (role: AgentRow['role']) =>
-    Number(/values="0 0;(-?[0-9.]+) -2;0 0"/.exec(drawTeam(working({}, [agent({ role, startedAt: AT - 500 })]), AT, USAGE))?.[1])
-  expect(lean('reviewer')).toBeGreaterThan(0)
-  expect(lean('explorer')).toBeLessThan(0)
+test('Claude does not lean towards the slot it just sent work to, during the out pulse or after it', async () => {
+  for (const role of ['explorer', 'reviewer'] as const) {
+    for (const startedAt of [AT - 500, AT - 5000]) {
+      const svg = drawTeam(working({}, [agent({ role, startedAt })]), AT, USAGE)
+      expect(svg).not.toContain('keyTimes="0;0.4;1"')
+      expect(svg).not.toMatch(/values="0 0;-?[0-9.]+ -2;0 0"/)
+    }
+  }
 })
 
 // ------------------------------------------------------------ the end of a turn

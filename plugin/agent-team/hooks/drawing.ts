@@ -231,8 +231,7 @@ const BADGE = { w: 32, h: 26, dx: -57, dy: 4 }
 
 /**
  * The tool Claude runs now, as a small pixel icon in a badge above its head.
- * It pops in once (a scale from nothing, held at its end), so it stays put
- * for as long as the markup does not change.
+ * Drawn still: it stays as it is until the kind of tool changes.
  */
 export const toolIcon = (leadX: number, leadTop: number, kind: ToolKind): string => {
   const bx = leadX + BADGE.dx
@@ -240,18 +239,14 @@ export const toolIcon = (leadX: number, leadTop: number, kind: ToolKind): string
   const p = 2.4
   const ix = bx + (BADGE.w - 7 * p) / 2
   const iy = by + (BADGE.h - 7 * p) / 2
-  const cx = bx + BADGE.w / 2
-  const cy = by + BADGE.h / 2
   const px = ICONS[kind].flatMap((row, r) =>
     [...row].flatMap((bit, col) => (bit === '1' ? [`<rect x="${(ix + col * p).toFixed(1)}" y="${(iy + r * p).toFixed(1)}" width="${p}" height="${p}"/>`] : [])),
   )
 
   return (
-    `<g id="dx-tool-${kind}" transform="translate(${cx} ${cy})"><g>` +
-    `<animateTransform attributeName="transform" type="scale" values="0;1.18;1" keyTimes="0;0.6;1" dur="0.3s" fill="freeze"/>` +
-    `<g transform="translate(${-cx} ${-cy})">` +
+    `<g id="dx-tool-${kind}">` +
     `<rect x="${bx}" y="${by}" width="${BADGE.w}" height="${BADGE.h}" rx="7" fill="#2b2440" stroke="${LOOK.main.color}" stroke-width="1.5"/>` +
-    `<g fill="#ffd166">${px.join('')}</g></g></g></g>`
+    `<g fill="#ffd166">${px.join('')}</g></g>`
   )
 }
 
@@ -590,7 +585,6 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
   // Claude's own moments. Each depends on `at` only through a window, never on a count or a clock.
   const main = squad.main
   const sinceEnd = main.endedAt === undefined ? Infinity : at - main.endedAt
-  const handoff = slots.findIndex(sl => pulseOf(sl.agent, at) === 'out')
   // The bubble shows before Claude's first tool of the turn, then the last tool's icon stays until the next one or the end:
   // the picture changes only with the kind of tool, never between two tools.
   const isInTool = main.status === 'working' && main.lastTool !== undefined
@@ -600,10 +594,6 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
   if (hasFailed && sinceEnd < MAIN_END_MS) {
     // a shake: the turn ended in an API error
     claude = `<g>${claude}<animateTransform attributeName="transform" type="translate" values="-3 0;3 0;-3 0;3 0;0 0" dur="0.5s" repeatCount="2"/></g>`
-  } else if (handoff >= 0) {
-    // a step towards the slot it just sent work to, once
-    const lean = Math.max(-8, Math.min(8, (colW * handoff + colW / 2 - leadX) / 12))
-    claude = `<g>${claude}<animateTransform attributeName="transform" type="translate" values="0 0;${lean.toFixed(1)} -2;0 0" keyTimes="0;0.4;1" dur="0.6s"/></g>`
   }
   out.push(
     `<rect x="${leadX - leadW / 2}" y="${leadTop}" width="${leadW}" height="${leadH}" rx="12" fill="${isWorking ? '#241a22' : '#1a1622'}" stroke="${isWorking || anyRunning ? LOOK.main.color : '#5a3a2a'}" stroke-width="2"/>`,
@@ -615,7 +605,7 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
   if (hasFailed) {
     out.push(`<text x="${leadX + leadW / 2 - 14}" y="${leadTop + 40}" text-anchor="middle" font-size="18" font-weight="bold" fill="#ff5c5c">!</text>`)
   } else if (main.endedOk === true && sinceEnd < MAIN_END_MS) {
-    out.push(check(leadX + 44, leadTop + 28, true))
+    out.push(check(leadX + 44, leadTop + 28, false))
   }
   if (isOverReading(squad.main)) {
     const bx = leadX + leadW / 2 - 4
@@ -697,18 +687,17 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
 export const FAILED_RESTING = '#7a3434'
 
 /** The bar under a sprite: sweeping while it works, full and coloured once it ended. */
-export const heartbeat = (x: number, y: number, w: number, color: string, status: AgentStatus | undefined, calls: number): string => {
+export const heartbeat = (x: number, y: number, w: number, color: string, status: AgentStatus | undefined, _calls = 0): string => {
   const h = 7
   const sweep = Math.min(30, w)
   const track = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="#26222f"/>`
   if (status === 'running') {
-    const beat = Math.min(w, 14 + Math.floor(calls / 3) * 24)
-
+    // One block gliding to the end and back, the same on every redraw: no part of it grows with the work done,
+    // so the markup stays put while the agent works and the motion never restarts or jumps back to the start.
     return (
       track +
-      `<rect x="${x}" y="${y}" width="${beat}" height="${h}" rx="${h / 2}" fill="${color}" opacity="0.5"/>` +
       `<rect x="${x}" y="${y}" width="${sweep}" height="${h}" rx="${h / 2}" fill="${color}">` +
-      `<animate attributeName="x" from="${x}" to="${x + w - sweep}" dur="1.4s" repeatCount="indefinite"/></rect>`
+      `<animate attributeName="x" values="${x};${x + w - sweep};${x}" keyTimes="0;0.5;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" dur="2.4s" repeatCount="indefinite"/></rect>`
     )
   }
   if (status === undefined) return track
