@@ -25,9 +25,11 @@ What you see:
   SendMessage, whose pulse down the wire is violet as well, until Claude
   sends a new agent of that role instead, or until a `/clear`. An asking
   agent's row is kept in the history like a running one.
-- At the drawing's left, two switches: ♪ mutes the pane's sounds and 🔔
-  turns off its system notifications (toasts still show); a red ✕ marks one
-  that is off. Both are kept in the store (`soundOn`, `notifyOn`). On the
+- At the drawing's left, two switches, each its icon alone: 🔊 mutes the
+  pane's sounds (🔇 while muted) and 🔔 turns off its system notifications
+  (🔕 while off; toasts still show). The desktop app draws a button's label
+  and nothing else, so the label is the icon: a longer one would squeeze the
+  drawing. Both are kept in the store (`soundOn`, `notifyOn`). On the
   terminal they sit on the title's line.
 - At the right of the team, in the same drawing and neon pixel style, a
   usage column: the 5-hour and weekly windows (LED bars, with the time each

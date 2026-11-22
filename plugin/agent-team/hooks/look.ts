@@ -32,8 +32,12 @@ export const WARN = '#ffb020'
  * apart from every role's colour (the reviewer's lavender, the tester's pink) and bright on the card.
  */
 export const ASK = '#e040fb'
-/** The cross over a toggle that is off. */
-export const OFF = '#ff5c5c'
+/** The sound switch's label, on and muted: the icon alone, as the desktop app draws only a button's label. */
+export const SOUND_ON = '🔊'
+export const SOUND_OFF = '🔇'
+/** The system notifications switch's label, on and off. */
+export const NOTIFY_ON = '🔔'
+export const NOTIFY_OFF = '🔕'
 
 export const STATUS_MARK: Record<AgentStatus, string> = { running: '●', done: '✓', failed: '✗', stopped: '■' }
 export const statusText = (status: AgentStatus): string => t(`status.${status}`)

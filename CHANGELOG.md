@@ -20,8 +20,8 @@ All notable changes to agent-team-kit. The format follows
   session log calls them asking, and a long run's system notification says
   it is asking.
 - Two switches at the left of the drawing (on the title's line in a
-  terminal) mute the pane's sounds and turn off its system notifications;
-  both are remembered across sessions.
+  terminal) mute the pane's sounds (🔊/🔇) and turn off its system
+  notifications (🔔/🔕); both are remembered across sessions.
 - An "Update now" button in the update chip, and `/agent-team update`, which
   ask GitHub for the latest release at once and, when it is newer, run the
   marketplace and plugin updates, then reload the plugins when the session

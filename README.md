@@ -77,8 +77,8 @@ until it gets a task, works while it runs and finishes with confetti and a
 sound of its own. Beside it, your usage limits: the 5-hour window with the
 time it fills at the current pace, the weekly window and the session's
 context, amber at 80 % and red at 95 %, with details on hover and a button to
-compact the context. At its left, two switches mute the pane's sounds and
-turn off its system notifications; both are remembered.
+compact the context. At its left, two switches mute the pane's sounds
+(🔊/🔇) and turn off its system notifications (🔔/🔕); both are remembered.
 
 Under the drawing, one tab at a time; a hidden tab's button flags what is
 happening in it, and the open tab is remembered.
