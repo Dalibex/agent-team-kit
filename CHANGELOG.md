@@ -6,6 +6,61 @@ All notable changes to agent-team-kit. The format follows
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-22
+
+### Added
+
+- A job's row in the Jobs tab names what it works on
+  (`maven · build · clean, install`).
+- The GitHub tab says when the pull request was merged or closed, and stops
+  showing its checks as live. On a branch without a pull request, a failed
+  workflow run shows on the tab button too.
+
+### Changed
+
+- The session log writes one file per session in `agent-team/runs/` instead
+  of rewriting `agent-team/runs.md`, so an entry can no longer be lost when
+  two windows end at once or the session is cut while writing. An existing
+  `runs.md` is left as it is.
+- CI polling backs off from every 2 minutes to every 5 and then 10 while
+  nothing changes, and stops after an hour (six while a check is really in
+  progress); the ↻ button still reads it. A
+  required check that never reported counts as waiting, not running.
+- The title of each tab no longer has a twinkling star.
+
+### Fixed
+
+- A pull request with a failed job no longer shows as passing when another
+  workflow has a job of the same name, and a queued re-run is no longer hidden
+  by the run it replaces.
+- A background job that runs for more than an hour stays as running while its
+  output grows, and its end is still heard.
+- A background command refused at the permission prompt, or one that fails to
+  start, no longer shows as running for an hour.
+- A shell stopped with TaskStop closes even when its task id was never read.
+- Dev servers and watchers (`spring-boot:run`, `bootRun`, `quarkus:dev`,
+  `docker compose up` without `-d`, `--watch`) are no longer shown as builds,
+  and health checks with `curl -o /dev/null` are no longer downloads.
+- `npm.cmd`, `npx.cmd`, `yarn.cmd`, `bun` and `python -m pytest` are tracked,
+  and the progress percentage is the latest one in the output.
+- A folder outside a git repository reads as such when git speaks another
+  language.
+- The session log and the rounds count only the team's own agents (the
+  built-in Explore and your own agents are no longer logged), and a round
+  whose start the engine never reported is still counted.
+- The session log is skipped when the session ends with too little time left:
+  that session's entry is lost and a line in the debug log says why. Under WSL
+  the log and the rules go to the Linux home.
+- An agent stopped by an API error keeps the precise reason, a brief warning is
+  no longer lost when the agent starts before its spawn is recorded, and an
+  agent closed by the engine's list ends its foreground job.
+- Two windows no longer overwrite each other's loose skill slots, and a skill
+  can no longer sit in two loose slots.
+- No more false waste warnings for the files Claude reads to edit them, or for
+  a reviewer sent on committed work; Spanish briefs compare as English ones do.
+- The GitHub tab keeps its refresh button when git fails, the drawing shows no
+  empty hover box, and tooltips fit a narrow pane.
+
 ## [0.8.6] - 2026-11-21
 
 ### Fixed
