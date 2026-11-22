@@ -776,7 +776,8 @@ type AgentCall = BuiltinToolInputs['Agent']
 /** Kept in `$.store`, global like the slots: the model and effort each team role runs on. */
 export const MODELS_KEY = 'teamModels'
 /** The tag of the stored value: a value with another one (or none) reads as the defaults. */
-export const MODELS_SHAPE = 'models-1'
+// models-2: 0.9.1's buttons hid their values, so choices made then are dropped once.
+export const MODELS_SHAPE = 'models-2'
 /** The team's roles, in the order the pane lists them. */
 export const TEAM_ROLES: readonly TeamRole[] = ['explorer', 'implementer', 'tester', 'reviewer']
 /** The models a role's button cycles through, and the effort levels. */
@@ -820,8 +821,7 @@ export const isDefaultChoice = (role: TeamRole, choice: ModelChoice): boolean =>
 export const isCostlier = (role: TeamRole, choice: ModelChoice): boolean => {
   const before = DEFAULT_MODELS[role]
   const isModelUp = choice.model === 'opus' && TEAM_MODELS.indexOf(choice.model) > TEAM_MODELS.indexOf(before.model)
-  const isEffortUp =
-    (choice.effort === 'xhigh' || choice.effort === 'max') && TEAM_EFFORTS.indexOf(choice.effort) > TEAM_EFFORTS.indexOf(before.effort)
+  const isEffortUp = TEAM_EFFORTS.indexOf(choice.effort) > TEAM_EFFORTS.indexOf(before.effort)
 
   return isModelUp || isEffortUp
 }

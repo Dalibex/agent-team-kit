@@ -142,12 +142,13 @@ prompt cache.
 
 The Models block ("Modelos"), under the Delegate switch, chooses what each
 role runs on: one row per role with its name, a model button (Haiku → Sonnet →
-Opus) and an effort button (low → medium → high → xhigh → max), each press
+Opus) and an effort button (low → medium → high → xhigh → max), each
+button showing its value and each press
 moving to the next value; "por defecto" marks a role still on what its agent
 file says (explorer Haiku/low, implementer and tester Sonnet/medium, reviewer
 Opus/high), and "Restablecer", shown once a role was moved, puts all four
-back. A role moved up to Opus, or to an effort of xhigh or max above its
-default, adds a dim line: it uses more of the 5-hour and weekly limits. The
+back. A role moved up to Opus, or to an effort above its default, adds a
+dim line: it uses more of the 5-hour and weekly limits. The
 choice is yours, not a project's: it is kept in the plugin's store
 (`teamModels`) for every project and session, the one copy every open window
 reads and writes (a press applies to what the store holds, so another

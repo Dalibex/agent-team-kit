@@ -6,6 +6,21 @@ All notable changes to agent-team-kit. The format follows
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-22
+
+### Fixed
+
+- The Models block's buttons show their value (Sonnet, medium) instead of a
+  cut name, so a press no longer changes something you cannot see. Choices
+  made with 0.9.1's unreadable buttons are dropped once, back to the
+  defaults.
+- Claude's tool icon and end-of-turn check stay still instead of popping in
+  again on every redraw, and Claude no longer lunges toward the agent it
+  delegates to.
+- The bar under a working agent is one block gliding to the end and back,
+  instead of a half-filled bar that grew with its tool calls and made the
+  drawing restart its motion.
+
 ## [0.9.1] - 2026-11-22
 
 ### Added

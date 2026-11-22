@@ -37,10 +37,6 @@ const models = atom({ plugin: 'agent-team', key: 'models' } as const, DEFAULT_MO
 const MODEL_LABEL: Record<TeamModel, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
 /** The width of a role's name in the models block, so its buttons line up: the longest name and a space. */
 const ROLE_COLS = 12
-/** A button's width in the models block: its longest value and the button's own frame, so a value that cycles does not move the row. */
-const BUTTON_FRAME = 4
-const MODEL_COLS = Math.max(...TEAM_MODELS.map(m => MODEL_LABEL[m].length)) + BUTTON_FRAME
-const EFFORT_COLS = Math.max(...TEAM_EFFORTS.map(level => level.length)) + BUTTON_FRAME
 
 /**
  * The pane: the drawing (the team and its usage column), the line under it
@@ -430,25 +426,9 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
               <Box width={ROLE_COLS} flexShrink={0}>
                 <Text color={LOOK[role].color}>{nameOf(role)}</Text>
               </Box>
-              {/* Each button keeps the width of its longest value, so the row does not shift as it cycles; its label names the control whole. */}
-              <Box width={MODEL_COLS} flexShrink={0}>
-                <Button
-                  key={`model-${role}`}
-                  label={t('models.modelOf', { role: nameOf(role), value: MODEL_LABEL[choice.model] })}
-                  onPress={() => void cycleModel($, role)}
-                >
-                  {MODEL_LABEL[choice.model]}
-                </Button>
-              </Box>
-              <Box width={EFFORT_COLS} flexShrink={0}>
-                <Button
-                  key={`effort-${role}`}
-                  label={t('models.effortOf', { role: nameOf(role), value: choice.effort })}
-                  onPress={() => void cycleEffort($, role)}
-                >
-                  {choice.effort}
-                </Button>
-              </Box>
+              {/* The desktop app draws a button's label, so the label is the value itself: what the press changes. */}
+              <Button key={`model-${role}`} label={MODEL_LABEL[choice.model]} onPress={() => void cycleModel($, role)} />
+              <Button key={`effort-${role}`} label={choice.effort} onPress={() => void cycleEffort($, role)} />
               {isDefaultChoice(role, choice) && <Text dimColor>{t('models.default')}</Text>}
             </Box>
           )

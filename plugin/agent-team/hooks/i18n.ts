@@ -248,10 +248,8 @@ const en = {
   'models.title': 'Models',
   'models.hint': 'a change applies from the next agent; a model Claude names for one task wins',
   'models.default': 'default',
-  'models.modelOf': '{role} model: {value}',
-  'models.effortOf': '{role} effort: {value}',
   'models.reset': 'Reset',
-  'models.costly': 'Opus, xhigh and max use more of the 5-hour and weekly limits',
+  'models.costly': 'Opus and a higher effort use more of the 5-hour and weekly limits',
 
   // the skills card
   'back': '← Back',
@@ -552,10 +550,8 @@ const es: Record<Key, string> = {
   'models.title': 'Modelos',
   'models.hint': 'un cambio vale desde el próximo agente; el modelo que Claude pida para una tarea manda',
   'models.default': 'por defecto',
-  'models.modelOf': 'modelo de {role}: {value}',
-  'models.effortOf': 'esfuerzo de {role}: {value}',
   'models.reset': 'Restablecer',
-  'models.costly': 'Opus, xhigh y max gastan más del límite de 5 horas y del semanal',
+  'models.costly': 'Opus y un esfuerzo mayor gastan más del límite de 5 horas y del semanal',
 
   'back': '← Volver',
   'edit': '✎ Editar',

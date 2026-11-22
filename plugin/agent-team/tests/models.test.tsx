@@ -14,7 +14,7 @@ const block = async ($: Engine, surface: (typeof SURFACES)[number] = 'desktop') 
     const found = await ui.find({ type: 'Button', key })
     return found === undefined ? undefined : String(found.props.label)
   }
-  // A model or effort button's label names the control whole ("implementer model: Sonnet"): the value is what follows the colon.
+  // A model or effort button's label is its value ("Sonnet", "medium").
   const value = async (key: string): Promise<string | undefined> => (await label(key))?.split(': ').pop()
   const roles: Record<string, { model?: string; effort?: string }> = {}
   const labels: Record<string, string | undefined> = {}
@@ -66,6 +66,25 @@ test('a missing, older or damaged stored value reads as the defaults; a good one
   ).toEqual({ ...DEFAULT_MODELS, tester: { model: 'opus', effort: 'medium' } })
 })
 
+test('a value stored under models-1 is ignored whole, and an effort that is not offered falls back to the role default', () => {
+  expect(MODELS_SHAPE).toBe('models-2')
+  expect(
+    modelsFrom({ shape: 'models-1', roles: { implementer: { model: 'sonnet', effort: 'xhigh' }, explorer: { model: 'opus', effort: 'low' } } }),
+  ).toEqual(DEFAULT_MODELS)
+  // under models-2 xhigh and max are offered and kept; only an unknown effort is that role's default
+  expect(
+    modelsFrom({
+      shape: 'models-2',
+      roles: { implementer: { model: 'opus', effort: 'xhigh' }, explorer: { model: 'sonnet', effort: 'turbo' }, reviewer: { model: 'opus', effort: 'max' } },
+    }),
+  ).toEqual({
+    ...DEFAULT_MODELS,
+    implementer: { model: 'opus', effort: 'xhigh' },
+    explorer: { model: 'sonnet', effort: 'low' },
+    reviewer: { model: 'opus', effort: 'max' },
+  })
+})
+
 test('the defaults are what the agent files say', () => {
   expect(DEFAULT_MODELS).toEqual({
     explorer: { model: 'haiku', effort: 'low' },
@@ -98,10 +117,10 @@ test('a session whose store holds choices draws them and runs on them', async ($
 // ------------------------------------------------------------ the Agent call
 
 test('a role moved off its defaults fills what the call left unset', () => {
-  const models = { ...DEFAULT_MODELS, tester: { model: 'opus', effort: 'xhigh' } } as const
-  expect(chosenFor({ subagent_type: 'agent-team:tester' }, models)).toEqual({ model: 'opus', effort: 'xhigh' })
+  const models = { ...DEFAULT_MODELS, tester: { model: 'opus', effort: 'high' } } as const
+  expect(chosenFor({ subagent_type: 'agent-team:tester' }, models)).toEqual({ model: 'opus', effort: 'high' })
   // Claude's own model for the call wins; the effort it left unset is the chosen one
-  expect(chosenFor({ subagent_type: 'agent-team:tester', model: 'sonnet' }, models)).toEqual({ model: 'sonnet', effort: 'xhigh' })
+  expect(chosenFor({ subagent_type: 'agent-team:tester', model: 'sonnet' }, models)).toEqual({ model: 'sonnet', effort: 'high' })
   expect(chosenFor({ subagent_type: 'agent-team:tester', model: 'haiku', effort: 'low' }, models)).toEqual({ model: 'haiku', effort: 'low' })
   // a role on its defaults, another agent type, the old bare names or no type: the call is left as it came
   expect(chosenFor({ subagent_type: 'agent-team:reviewer' }, models)).toBeUndefined()
@@ -172,8 +191,8 @@ test("a call from inside an agent is rewritten too, and the spawned agent's row 
 // ------------------------------------------------------------ the block
 
 for (const [lang, env, words] of [
-  ['Spanish', undefined, { title: 'Modelos', mark: 'por defecto', reset: 'Restablecer', costly: /^Opus, xhigh y max gastan más/, model: 'modelo de implementer: Sonnet', effort: 'esfuerzo de implementer: medium' }],
-  ['English', ENGLISH, { title: 'Models', mark: 'default', reset: 'Reset', costly: /^Opus, xhigh and max use more/, model: 'implementer model: Sonnet', effort: 'implementer effort: medium' }],
+  ['Spanish', undefined, { title: 'Modelos', mark: 'por defecto', reset: 'Restablecer', costly: /^Opus y un esfuerzo mayor gastan más/, model: 'Sonnet', effort: 'medium' }],
+  ['English', ENGLISH, { title: 'Models', mark: 'default', reset: 'Reset', costly: /^Opus and a higher effort use more/, model: 'Sonnet', effort: 'medium' }],
 ] as const) {
   for (const surface of SURFACES) {
     test(`the models block in ${lang} on ${surface}: one row a role, the default mark, cycling and reset`, async ($, on) => {
@@ -189,7 +208,7 @@ for (const [lang, env, words] of [
         reviewer: { model: 'Opus', effort: 'high' },
       })
       for (const role of ['explorer', 'implementer', 'tester', 'reviewer']) expect(fresh.texts).toContain(role)
-      // each button is named whole, its value drawn on it
+      // each button is labelled with its value, which the desktop app draws
       expect(fresh.labels['model-implementer']).toBe(words.model)
       expect(fresh.labels['effort-implementer']).toBe(words.effort)
       expect(fresh.texts.filter(text => text === words.mark)).toHaveLength(4)
@@ -209,7 +228,7 @@ for (const [lang, env, words] of [
       }
       expect(efforts).toEqual(['medium', 'high', 'xhigh', 'max', 'low'])
 
-      // a moved role loses its mark; Opus or an effort past high says what it spends
+      // a moved role loses its mark; Opus or an effort above its default says what it spends
       await press($, 'model-tester')
       const moved = await block($, surface)
       expect(moved.texts.filter(text => text === words.mark)).toHaveLength(3)
@@ -225,15 +244,18 @@ for (const [lang, env, words] of [
   }
 }
 
-test('a role moved to a cheaper setting is not called costly', async ($, on) => {
+test('a role moved to a cheaper setting is not called costly, and one moved up is', async ($, on) => {
   boot(on)
   await start($)
-  // implementer: medium → high, still Sonnet
-  await press($, 'effort-implementer')
+  // implementer: medium → high → xhigh → max → low, still Sonnet
+  await press($, 'effort-implementer', 4)
   const shown = await block($)
+  expect(shown.roles.implementer).toEqual({ model: 'Sonnet', effort: 'low' })
   expect(shown.reset).toBe('Restablecer')
   expect(shown.texts.some(text => /gastan más/.test(text))).toBe(false)
-  // high → xhigh
+  // low → medium is its default again, nothing costly; medium → high is above it
+  await press($, 'effort-implementer')
+  expect((await block($)).texts.some(text => /gastan más/.test(text))).toBe(false)
   await press($, 'effort-implementer')
   expect((await block($)).texts.some(text => /gastan más/.test(text))).toBe(true)
 })
@@ -272,12 +294,12 @@ test('a moved role is named with its chosen model, and its effort when that move
   const text = teamDelegation({
     ...DEFAULT_MODELS,
     explorer: { model: 'sonnet', effort: 'low' },
-    tester: { model: 'opus', effort: 'max' },
+    tester: { model: 'opus', effort: 'high' },
     reviewer: { model: 'sonnet', effort: 'high' },
   })
   expect(text).toContain('`agent-team:explorer` (Sonnet, cheap read-only search)')
   expect(text).toContain('`agent-team:implementer` (Sonnet, makes an agreed change')
-  expect(text).toContain('`agent-team:tester` (Opus at max effort, writes and runs tests)')
+  expect(text).toContain('`agent-team:tester` (Opus at high effort, writes and runs tests)')
   // off Opus the reviewer is no longer called the costliest
   expect(text).toContain('`agent-team:reviewer` (Sonnet, reviews a finished diff; only for non-trivial changes)')
   expect(text).not.toContain('Haiku')
@@ -352,14 +374,17 @@ test('an explicit model the pane does not offer survives the rewrite, and a fork
 
 // ------------------------------------------------------------ what costs more
 
-test('only a role moved up is costlier: to Opus from below, or its effort past its default to xhigh or max', () => {
+test('a role is costlier when moved up to Opus from below, or when its effort is above its default', () => {
   expect(isCostlier('explorer', { model: 'opus', effort: 'low' })).toBe(true)
-  expect(isCostlier('implementer', { model: 'sonnet', effort: 'xhigh' })).toBe(true)
-  expect(isCostlier('reviewer', { model: 'opus', effort: 'max' })).toBe(true)
-  // the reviewer lowered, or a rise that stays below xhigh
+  expect(isCostlier('implementer', { model: 'sonnet', effort: 'high' })).toBe(true)
+  // an effort rise counts for any role, the explorer's low → medium included
+  expect(isCostlier('explorer', { model: 'haiku', effort: 'medium' })).toBe(true)
+  expect(isCostlier('explorer', { model: 'haiku', effort: 'high' })).toBe(true)
+  // the defaults, a reviewer lowered, or a model below Opus at its default effort
+  expect(isCostlier('reviewer', { model: 'opus', effort: 'high' })).toBe(false)
   expect(isCostlier('reviewer', { model: 'opus', effort: 'low' })).toBe(false)
   expect(isCostlier('reviewer', { model: 'haiku', effort: 'high' })).toBe(false)
-  expect(isCostlier('implementer', { model: 'sonnet', effort: 'high' })).toBe(false)
+  expect(isCostlier('implementer', { model: 'sonnet', effort: 'low' })).toBe(false)
   expect(isCostlier('explorer', { model: 'sonnet', effort: 'low' })).toBe(false)
 })
 
@@ -376,12 +401,14 @@ test('a reviewer lowered to Opus at low says nothing of the limits', async ($, o
 
 test('"the costliest" stays with the reviewer only while no other role runs on as much', () => {
   expect(isCostliest(DEFAULT_MODELS, 'reviewer')).toBe(true)
-  const tester = { ...DEFAULT_MODELS, tester: { model: 'opus', effort: 'max' } } as const
-  expect(isCostliest(tester, 'reviewer')).toBe(false)
-  expect(teamDelegation(tester)).toContain('reviews a finished diff; only for non-trivial changes')
-  // a tie is no superlative either
-  const tie = { ...DEFAULT_MODELS, implementer: { model: 'opus', effort: 'high' } } as const
+  // a tie is no superlative
+  const tie = { ...DEFAULT_MODELS, tester: { model: 'opus', effort: 'high' } } as const
+  expect(isCostliest(tie, 'reviewer')).toBe(false)
+  expect(teamDelegation(tie)).toContain('reviews a finished diff; only for non-trivial changes')
   expect(teamDelegation(tie)).not.toContain('the costliest')
+  // another role on more than the reviewer lowered
+  const above = { ...DEFAULT_MODELS, reviewer: { model: 'opus', effort: 'low' }, tester: { model: 'opus', effort: 'medium' } } as const
+  expect(teamDelegation(above)).not.toContain('the costliest')
   // the reviewer lowered in effort but still alone on top keeps it
   expect(teamDelegation({ ...DEFAULT_MODELS, reviewer: { model: 'opus', effort: 'low' } })).toContain('the costliest, so only for')
 })
