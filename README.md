@@ -9,6 +9,10 @@ The plugin ships the agents, gives every brief the context it needs, and shows
 the team at work beside the conversation, with your usage limits, your skill
 packs, your builds and your repository's state. In English or Spanish.
 
+<p align="center">
+  <img src="docs/images/cover.svg" alt="The agent-team drawing: Claude at work, the explorer just sent off, the implementer hammering, the tester just done, and the usage column at the right" width="820">
+</p>
+
 ## Contents
 
 - [Install](#install)
@@ -70,6 +74,10 @@ Four agents ship inside the plugin, and Claude sees them as
   presents the team and points to your rules. The Delegate switch in the Team
   tab turns it off, from the next conversation on.
 
+<p align="center">
+  <img src="docs/images/asking.svg" alt="The reviewer stopped to ask: its slot is violet with a question mark and its pulse runs back to Claude" width="820">
+</p>
+
 ## The pane
 
 The drawing shows Claude and its agents as pixel sprites: an agent sleeps
@@ -79,6 +87,13 @@ time it fills at the current pace, the weekly window and the session's
 context, amber at 80 % and red at 95 %, with details on hover and a button to
 compact the context. At its left, two switches mute the pane's sounds
 (🔊/🔇) and turn off its system notifications (🔔/🔕); both are remembered.
+
+<p align="center">
+  <img src="docs/images/done.svg" alt="Work handed back: confetti and a check over the implementer and the tester" width="820">
+</p>
+<p align="center">
+  <img src="docs/images/limits.svg" alt="Near the limit: the 5-hour bar is red and blinks, and a line says when it fills at the current pace" width="820">
+</p>
 
 Under the drawing, one tab at a time; a hidden tab's button flags what is
 happening in it, and the open tab is remembered.
@@ -193,7 +208,14 @@ plugin/agent-team/                the plugin
                                   drawing.ts, look.ts, usage.ts, jobs.ts, github.ts
   agents/                         the four agents
   tests/                          the test suite
+docs/images/                      the README's pictures, drawn by scripts/readme-images/
 ```
+
+The pictures come from the plugin's own drawing code, so redraw them when the
+drawing changes: `node --import ./scripts/readme-images/register.mjs
+scripts/readme-images/draw.mjs` writes the SVG scenes, and
+`scripts/readme-images/png.ps1` (Windows, Edge or Chrome) the 1280×640 social
+preview.
 
 ```bash
 claude plugin test plugin/agent-team
