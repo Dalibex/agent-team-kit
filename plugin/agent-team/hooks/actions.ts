@@ -2,7 +2,7 @@
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, SessionMeasureInput, UiPressArgument } from 'claude-code'
-import type { AgentRow, ForegroundJob, Pack, Role, ShellTask, SkillView, Team, Trail } from '../types'
+import type { AgentRow, ForegroundJob, Pack, Role, ShellTask, SkillView, Team, TeamModels, TeamRole, Trail } from '../types'
 import { ciFinished, opsOf, readGit } from './github'
 import { classify, progressOf } from './jobs'
 import { extendTrail, newWarnings, pruneWarned, resetText, trailFrom, usageOf, windowName } from './usage'
@@ -11,7 +11,7 @@ import { planInstall, planRemove } from './rules'
 import type { UpdateRecord } from './update'
 import { isNewer, manifestVersion, recordFrom, releaseFrom, RELEASE_URL, UPDATE_KEY, UPDATE_MS } from './update'
 import { branding, FAIL_SOUND, LOOK, seconds } from './look'
-import { ARMED_KEY, armedBookFrom, runsFileName, CHIME_GAP_MS, cleanPackName, DELEGATION_KEY, PACK_NAME_MAX, packsFrom, projectKeyOf, reviewWarning, shortstatLines, closeRow, COMMAND, EMPTY, FIRST_TAB, GIT_SHAPE, isShellRunning, jobEndOf, LONG_MS, namesCommittedWork, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_PICKER, NO_SLOTS, NO_UPDATE, PACK_SIZE, packDeleteAsk, PACKS_KEY, PACKS_VIEW, roleOf, shellOf, shellSound, SKILLS_EDIT, SLOTS_KEY, slotsFrom, STALE_MS, statusOfListed, stopLeftovers, stoppedIdOf, TAB_KEY, TAIL_MAX_BYTES, TEAM_SHAPE, titleOf, TOUCHES_GIT, TRAIL_KEY, USAGE_SHAPE, WARNED_KEY, withArmed, withJob, withRows, withShell } from './state'
+import { ARMED_KEY, armedBookFrom, runsFileName, CHIME_GAP_MS, cleanPackName, DELEGATION_KEY, PACK_NAME_MAX, packsFrom, projectKeyOf, reviewWarning, shortstatLines, closeRow, COMMAND, cycled, DEFAULT_MODELS, EMPTY, MODELS_KEY, modelsEntry, modelsFrom, TEAM_EFFORTS, TEAM_MODELS, FIRST_TAB, GIT_SHAPE, isShellRunning, jobEndOf, LONG_MS, namesCommittedWork, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_PICKER, NO_SLOTS, NO_UPDATE, PACK_SIZE, packDeleteAsk, PACKS_KEY, PACKS_VIEW, roleOf, shellOf, shellSound, SKILLS_EDIT, SLOTS_KEY, slotsFrom, STALE_MS, statusOfListed, stopLeftovers, stoppedIdOf, TAB_KEY, TAIL_MAX_BYTES, TEAM_SHAPE, titleOf, TOUCHES_GIT, TRAIL_KEY, USAGE_SHAPE, WARNED_KEY, withArmed, withJob, withRows, withShell } from './state'
 import type { CardId, GitOperation, Ran, ShellCall } from './state'
 import { NO_USAGE } from './usage'
 import { NO_GIT } from './github'
@@ -34,6 +34,7 @@ const skillView = atom({ plugin: 'agent-team', key: 'skillView' } as const, PACK
 const delegation = atom({ plugin: 'agent-team', key: 'delegation' } as const, true)
 const cwd = atom({ plugin: 'agent-team', key: 'cwd' } as const, '')
 const updateNotice = atom({ plugin: 'agent-team', key: 'update' } as const, NO_UPDATE)
+const models = atom({ plugin: 'agent-team', key: 'models' } as const, DEFAULT_MODELS)
 
 /** Pins one line under the prompt with what is alive; clears it when idle. */
 export async function refreshStatus($: EngineInterface): Promise<void> {
@@ -347,6 +348,36 @@ export async function toggleDelegation($: EngineInterface): Promise<void> {
   await update($, delegation, isOn => !isOn)
   await quietly(read($, delegation).then(isOn => $.store.set(DELEGATION_KEY, isOn)))
   $.ui.invalidate('tool.describe')
+}
+
+/**
+ * Writes the team's models and keeps them in the store; the next spawn of a
+ * team agent runs on them. The Agent tool's team paragraph names them: its
+ * cached text is dropped, as the Delegate switch does, for the next conversation.
+ */
+async function setModels($: EngineInterface, change: (models: TeamModels) => TeamModels): Promise<void> {
+  // The store is the one truth, shared by every window: a change applies to what it holds now, so another
+  // window's choice made since this one started is kept. Only a store that cannot be read falls back to the atom.
+  const stored = await $.store.get(MODELS_KEY).then(modelsFrom, () => undefined)
+  const changed = change(stored ?? (await read($, models)))
+  await update($, models, () => changed)
+  await quietly($.store.set(MODELS_KEY, modelsEntry(changed)))
+  $.ui.invalidate('tool.describe')
+}
+
+/** Moves a role's model to the next one: Haiku, Sonnet, Opus, then Haiku again. */
+export async function cycleModel($: EngineInterface, role: TeamRole): Promise<void> {
+  await setModels($, m => ({ ...m, [role]: { ...m[role], model: cycled(TEAM_MODELS, m[role].model) } }))
+}
+
+/** Moves a role's effort to the next level: low up to max, then low again. */
+export async function cycleEffort($: EngineInterface, role: TeamRole): Promise<void> {
+  await setModels($, m => ({ ...m, [role]: { ...m[role], effort: cycled(TEAM_EFFORTS, m[role].effort) } }))
+}
+
+/** Puts every role back on what its agent file says. */
+export async function resetModels($: EngineInterface): Promise<void> {
+  await setModels($, () => DEFAULT_MODELS)
 }
 
 /** Shows a tab under the drawing; the next session opens on it. */

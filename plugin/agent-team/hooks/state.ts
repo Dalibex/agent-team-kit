@@ -1,11 +1,12 @@
 // The pane's state (atoms and store keys), its limits and timings, and the pure logic over the team.
 
-import type { AgentRow, LoggedMark, AgentStatus, ArmedEntry, ForegroundJob, JobMatch, MainLoop, Pack, Role, RoleTotal, ShellTask, SkillChoice, SkillView, SlotPicker, Team, Tokens, UpdateNotice } from '../types'
+import type { AgentRow, LoggedMark, AgentStatus, ArmedEntry, ForegroundJob, JobMatch, MainLoop, ModelChoice, Pack, Role, RoleTotal, ShellTask, SkillChoice, SkillView, SlotPicker, Team, TeamEffort, TeamModel, TeamModels, TeamRole, Tokens, UpdateNotice } from '../types'
+import type { BuiltinToolInputs } from 'claude-code'
 import { opsOf } from './github'
 import { t, tn } from './i18n'
 import type { Key } from './i18n'
 import { classify, kindText, looksFailed, outputPathOf } from './jobs'
-import { kilo } from './usage'
+import { kilo, percentText } from './usage'
 import { FAIL_SOUND, LOOK, nameOf, seconds, statusText, WARN } from './look'
 
 export const PANE = 'agent-team'
@@ -767,6 +768,95 @@ export const DELEGATION_KEY = 'delegation'
  */
 export const TEAM_TYPES = new Set(['agent-team:explorer', 'agent-team:implementer', 'agent-team:tester', 'agent-team:reviewer'])
 
+// ------------------------------------------------------------ the team's models
+
+/** The Agent tool's input, as Claude writes the call. */
+type AgentCall = BuiltinToolInputs['Agent']
+
+/** Kept in `$.store`, global like the slots: the model and effort each team role runs on. */
+export const MODELS_KEY = 'teamModels'
+/** The tag of the stored value: a value with another one (or none) reads as the defaults. */
+export const MODELS_SHAPE = 'models-1'
+/** The team's roles, in the order the pane lists them. */
+export const TEAM_ROLES: readonly TeamRole[] = ['explorer', 'implementer', 'tester', 'reviewer']
+/** The models a role's button cycles through, and the effort levels. */
+export const TEAM_MODELS: readonly TeamModel[] = ['haiku', 'sonnet', 'opus']
+export const TEAM_EFFORTS: readonly TeamEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+/** What the agents' own files (agents/*.md) set: a role left here gets no rewrite. */
+export const DEFAULT_MODELS: TeamModels = {
+  explorer: { model: 'haiku', effort: 'low' },
+  implementer: { model: 'sonnet', effort: 'medium' },
+  tester: { model: 'sonnet', effort: 'medium' },
+  reviewer: { model: 'opus', effort: 'high' },
+}
+
+/** The choices read back from the store, whatever it held: a role or field that is not one of the offered values is its default. */
+export const modelsFrom = (value: unknown): TeamModels => {
+  const stored = typeof value === 'object' && value !== null ? (value as { shape?: unknown; roles?: unknown }) : undefined
+  const roles = stored?.shape === MODELS_SHAPE && typeof stored.roles === 'object' && stored.roles !== null ? (stored.roles as Record<string, unknown>) : {}
+  const one = (role: TeamRole): ModelChoice => {
+    const kept = typeof roles[role] === 'object' && roles[role] !== null ? (roles[role] as { model?: unknown; effort?: unknown }) : {}
+    const model = TEAM_MODELS.find(m => m === kept.model) ?? DEFAULT_MODELS[role].model
+    const effort = TEAM_EFFORTS.find(level => level === kept.effort) ?? DEFAULT_MODELS[role].effort
+
+    return { model, effort }
+  }
+
+  return { explorer: one('explorer'), implementer: one('implementer'), tester: one('tester'), reviewer: one('reviewer') }
+}
+
+/** The value the store keeps for the choices. */
+export const modelsEntry = (models: TeamModels): { shape: string; roles: TeamModels } => ({ shape: MODELS_SHAPE, roles: models })
+
+/** Whether a role runs on what its agent file says. */
+export const isDefaultChoice = (role: TeamRole, choice: ModelChoice): boolean =>
+  choice.model === DEFAULT_MODELS[role].model && choice.effort === DEFAULT_MODELS[role].effort
+
+/**
+ * Whether a role was moved to spend more of the limits than its agent file
+ * says: up to Opus from a lighter model, or its effort raised past its default
+ * to xhigh or max. A role moved down (the reviewer on Opus at low) is not.
+ */
+export const isCostlier = (role: TeamRole, choice: ModelChoice): boolean => {
+  const before = DEFAULT_MODELS[role]
+  const isModelUp = choice.model === 'opus' && TEAM_MODELS.indexOf(choice.model) > TEAM_MODELS.indexOf(before.model)
+  const isEffortUp =
+    (choice.effort === 'xhigh' || choice.effort === 'max') && TEAM_EFFORTS.indexOf(choice.effort) > TEAM_EFFORTS.indexOf(before.effort)
+
+  return isModelUp || isEffortUp
+}
+
+/** A choice's weight, to rank roles by what they spend: the model first, then the effort. */
+const weightOf = (choice: ModelChoice): number => TEAM_MODELS.indexOf(choice.model) * TEAM_EFFORTS.length + TEAM_EFFORTS.indexOf(choice.effort)
+
+/** Whether `role` alone runs on the most: no other role weighs as much. */
+export const isCostliest = (models: TeamModels, role: TeamRole): boolean =>
+  TEAM_ROLES.every(other => other === role || weightOf(models[other]) < weightOf(models[role]))
+
+/** The value after `current` in `list`, back to the first after the last. */
+export const cycled = <T>(list: readonly T[], current: T): T => list[(list.indexOf(current) + 1) % list.length] ?? current
+
+/** The role of a team agent type (`agent-team:tester`), or undefined for any other. */
+export const teamRoleOf = (type: string | undefined): TeamRole | undefined =>
+  type === undefined ? undefined : TEAM_ROLES.find(role => type === `agent-team:${role}`)
+
+/**
+ * The model and effort an Agent call runs with: a team role the person moved
+ * off its defaults fills what the call left unset; what the call names (Claude
+ * escalating a task to Opus) wins. Undefined leaves the call as it came.
+ */
+export const chosenFor = (
+  call: Pick<AgentCall, 'subagent_type' | 'model' | 'effort'>,
+  models: TeamModels,
+): Required<Pick<AgentCall, 'model' | 'effort'>> | undefined => {
+  const role = teamRoleOf(call.subagent_type)
+  if (role === undefined) return undefined
+  const chosen = models[role]
+  if (isDefaultChoice(role, chosen)) return undefined
+
+  return { model: call.model ?? chosen.model, effort: call.effort ?? chosen.effort }
+}
+
 /** Opens and closes the block; a brief that already ends with one is not given a second. */
 export const TEAM_CONTEXT_TAG = '<team-context>'
 const TEAM_CONTEXT_END = '</team-context>'
@@ -816,17 +906,40 @@ export const isTeamBrief = (e: { subagentType: string; fork: boolean; resume?: u
   e.workflow === undefined &&
   !e.prompt.trimEnd().endsWith(TEAM_CONTEXT_END)
 
-/** What the Agent tool says about the team, in place of the engine's advice not to delegate unasked. */
-export const TEAM_DELEGATION =
-  "**The user's agent team.** The user set up a team for this work: `agent-team:explorer` (Haiku, cheap read-only " +
-  'search), `agent-team:implementer` (Sonnet, makes an agreed change and verifies it), `agent-team:tester` (Sonnet, ' +
-  'writes and runs tests) and `agent-team:reviewer` (Opus, reviews a finished diff; the costliest, so only for ' +
-  "non-trivial changes). Delegate to them as the team rules in the user's instructions say, without asking first; " +
-  'where there are no such rules, send the explorer when an answer needs more than five files. A spawn starts ' +
-  'without this conversation, so its brief carries the goal, why, files with lines, done-when and limits. To follow ' +
-  'up with an agent that already has the context (an answer to its QUESTIONS, a fix to its own work), continue it ' +
-  'with SendMessage instead of spawning a new one. For anything else work inline with your own tools, and spawn ' +
-  'other agent types only when the user asks.'
+/** A model as the team's paragraph names it. */
+const MODEL_NAME: Record<TeamModel, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
+
+/**
+ * What the Agent tool says about the team, in place of the engine's advice not
+ * to delegate unasked: each role with the model the person chose for it (and
+ * its effort, where that was moved). On the defaults it is TEAM_DELEGATION.
+ */
+export const teamDelegation = (models: TeamModels): string => {
+  const runs = (role: TeamRole): string => {
+    const chosen = models[role]
+    const effort = chosen.effort === DEFAULT_MODELS[role].effort ? '' : ` at ${chosen.effort} effort`
+
+    return `${MODEL_NAME[chosen.model]}${effort}`
+  }
+  // "The costliest" only while the reviewer alone runs on the most: the highest model, ties by effort.
+  const reviewerNote = isCostliest(models, 'reviewer') ? 'the costliest, so only for ' : 'only for '
+
+  return (
+    "**The user's agent team.** The user set up a team for this work: `agent-team:explorer` (" +
+    `${runs('explorer')}, cheap read-only search), \`agent-team:implementer\` (${runs('implementer')}, makes an agreed ` +
+    `change and verifies it), \`agent-team:tester\` (${runs('tester')}, writes and runs tests) and ` +
+    `\`agent-team:reviewer\` (${runs('reviewer')}, reviews a finished diff; ${reviewerNote}` +
+    "non-trivial changes). Delegate to them as the team rules in the user's instructions say, without asking first; " +
+    'where there are no such rules, send the explorer when an answer needs more than five files. A spawn starts ' +
+    'without this conversation, so its brief carries the goal, why, files with lines, done-when and limits. To follow ' +
+    'up with an agent that already has the context (an answer to its QUESTIONS, a fix to its own work), continue it ' +
+    'with SendMessage instead of spawning a new one. For anything else work inline with your own tools, and spawn ' +
+    'other agent types only when the user asks.'
+  )
+}
+
+/** The team's paragraph with every role on its defaults. */
+export const TEAM_DELEGATION = teamDelegation(DEFAULT_MODELS)
 
 /** The engine's paragraph that tells the model not to spawn agents unless the person asks, up to its web-fetch note. */
 const NO_SPAWN = /\*\*Do not spawn agents unless the user asks\.\*\*[^\r\n]*?(?=This does not cover the `web-fetch`|\r?\n|$)/
@@ -836,10 +949,11 @@ const NO_SPAWN = /\*\*Do not spawn agents unless the user asks\.\*\*[^\r\n]*?(?=
  * advice not to delegate; where the engine words it otherwise, the paragraph
  * is added at the end and the engine's text is kept.
  */
-export const withTeamDelegation = (description: string): string =>
-  NO_SPAWN.test(description)
-    ? description.replace(NO_SPAWN, `${TEAM_DELEGATION} `)
-    : `${description}\n\n${TEAM_DELEGATION}`
+export const withTeamDelegation = (description: string, models: TeamModels = DEFAULT_MODELS): string => {
+  const team = teamDelegation(models)
+
+  return NO_SPAWN.test(description) ? description.replace(NO_SPAWN, `${team} `) : `${description}\n\n${team}`
+}
 
 // ------------------------------------------------------------ waste the pane can see
 
@@ -977,7 +1091,7 @@ export const spendParts = (squad: Team): { parts: { role: Role; text: string }[]
   const total = Object.values(squad.totals).reduce((sum, one) => sum + (one?.tokens ?? 0), 0)
   const team = total - (squad.totals.main?.tokens ?? 0)
 
-  return { parts, share: total === 0 || team === 0 ? '' : t('spend.share', { percent: Math.round((team / total) * 100) }) }
+  return { parts, share: total === 0 || team === 0 ? '' : t('spend.share', { percent: percentText(Math.round((team / total) * 100)) }) }
 }
 
 /** From this many rounds on, the pane tells Claude to ask the user (the team rules' limit). */
@@ -1081,7 +1195,7 @@ export const spendLine = (squad: Team): string => {
   if (all === '') return ''
   const total = Object.values(squad.totals).reduce((sum, one) => sum + (one?.tokens ?? 0), 0)
   const team = total - (squad.totals.main?.tokens ?? 0)
-  const share = total === 0 || team === 0 ? '' : ` · ${t('spend.share', { percent: Math.round((team / total) * 100) })}`
+  const share = total === 0 || team === 0 ? '' : ` · ${t('spend.share', { percent: percentText(Math.round((team / total) * 100)) })}`
 
   return t('spend.line', { all: `${all}${share}` })
 }

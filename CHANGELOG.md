@@ -6,6 +6,34 @@ All notable changes to agent-team-kit. The format follows
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-22
+
+### Added
+
+- A **Models** block at the foot of the Team tab: pick each role's model
+  (Haiku, Sonnet, Opus) and effort (low to max). The defaults are the ones the
+  agents ship with, marked as such, and Reset brings them back. The choice
+  applies to every project from the next agent sent, and the team paragraph
+  Claude reads names the models picked. When Claude sets a model or effort for
+  one task itself, its choice wins for that task. A dim line warns that Opus
+  and the highest efforts spend more of the usage limits.
+
+### Changed
+
+- Once an agent's afterglow ends, its slot rests like an empty one instead of
+  staying green; a failed one keeps a dim red border until the role runs
+  again.
+- The "View its conversation" button shows only on the terminal: the desktop
+  app draws its own conversation, so the engine cannot switch it there.
+
+### Fixed
+
+- The drawing no longer starts on the still pose for a moment when the pane
+  opens.
+- Percentages read the same way across the pane.
+- Two memory files with the same name in different folders are told apart in
+  the Usage tab.
+
 ## [0.9.0] - 2026-11-22
 
 ### Added

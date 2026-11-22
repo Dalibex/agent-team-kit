@@ -197,17 +197,17 @@ test('the first ask is recorded with its time, and a second session within the d
 test('a record older than a day is asked again, and a still newer version toasts again', async ($, on) => {
   const world = boot(on)
   world.stored[UPDATE_KEY] = { at: LONG_AGO, version: '9.9.0', url: PAGE, toasted: '9.9.0' }
-  world.http = () => release('v0.9.1')
+  world.http = () => release('v9.9.1')
   await start($)
   await afterStart(world)
 
   expect(world.fetched).toHaveLength(1)
   expect(await updateLink($)).toEqual({
-    href: 'https://github.com/Dalibex/agent-team-kit/releases/tag/v0.9.1',
-    label: 'agent-team 0.9.1 disponible',
+    href: 'https://github.com/Dalibex/agent-team-kit/releases/tag/v9.9.1',
+    label: 'agent-team 9.9.1 disponible',
   })
-  expect(world.toasts.filter(text => text.includes('0.9.1'))).toHaveLength(1)
-  expect(world.stored[UPDATE_KEY]).toMatchObject({ version: '0.9.1', toasted: '0.9.1' })
+  expect(world.toasts.filter(text => text.includes('9.9.1'))).toHaveLength(1)
+  expect(world.stored[UPDATE_KEY]).toMatchObject({ version: '9.9.1', toasted: '9.9.1' })
 })
 
 test('a session that runs on does not ask again within the day', async ($, on) => {

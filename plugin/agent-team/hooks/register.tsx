@@ -7,7 +7,7 @@ import { beginLanguage, settleLanguage, t } from './i18n'
 import { branding, brandingOf, nameOf, seconds, setBranding } from './look'
 import { UPDATE_MS } from './update'
 import { renderPane } from './pane'
-import { addRun, apiErrorText, COMMAND, contextFor, DELEGATION_KEY, detailOf, editPathOf, isMissedRound, isTeamBrief, TEAM_TYPES, withRead, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, isStill, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, plusTokens, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
+import { addRun, apiErrorText, chosenFor, COMMAND, contextFor, DEFAULT_MODELS, DELEGATION_KEY, MODELS_KEY, modelsFrom, detailOf, editPathOf, isMissedRound, isTeamBrief, TEAM_TYPES, withRead, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, isStill, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, plusTokens, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
 import { NO_GIT } from './github'
 import { noteCompaction, noteTool, noteTurnEnd, noteTurnStart, refreshContext } from './usage'
 
@@ -25,6 +25,7 @@ const cwd = atom({ plugin: 'agent-team', key: 'cwd' } as const, '')
 const choices = atom({ plugin: 'agent-team', key: 'choices' } as const, NO_CHOICES)
 const delegation = atom({ plugin: 'agent-team', key: 'delegation' } as const, true)
 const logged = atom({ plugin: 'agent-team', key: 'logged' } as const, NO_LOGGED)
+const models = atom({ plugin: 'agent-team', key: 'models' } as const, DEFAULT_MODELS)
 
 /** Reads the context breakdown again when the usage tab is the one shown: a hidden tab reads it when it opens. */
 const refreshIfShown = ($: EngineInterface): Promise<void> =>
@@ -54,11 +55,14 @@ export const register: Register = (on, options) => {
       v => v === false,
       () => false,
     )
-    if (!wasHidden) void quietly($.ui.open({ id: PANE, title: branding.title }))
-    await quietly(adopt($))
-    // The sprites hold a still pose only after a quiet minute: the count starts with the session.
+    // The sprites hold a still pose only after a quiet minute: the count starts with the session, before the pane's first frame.
     const openedAt = await $.clock.now()
     await quietly(update($, team, t => ({ ...t, main: { ...t.main, openedAt } })))
+    if (!wasHidden) void quietly($.ui.open({ id: PANE, title: branding.title }))
+    await quietly(adopt($))
+    // The team's models are the person's, the same in every project; a missing or older value reads as the defaults.
+    const storedModels = await $.store.get(MODELS_KEY).then(modelsFrom, () => DEFAULT_MODELS)
+    await quietly(update($, models, () => storedModels))
     const storedDelegation = await $.store.get(DELEGATION_KEY).then(v => v !== false, () => true)
     await quietly(update($, delegation, () => storedDelegation))
     const storedTab = await $.store.get(TAB_KEY).then(tabFrom, () => undefined)
@@ -185,8 +189,11 @@ export const register: Register = (on, options) => {
     await settleLanguage($, options.language)
     const described = await next(e)
     const isOn = await $.store.get(DELEGATION_KEY).then(v => v !== false, () => true)
+    if (!isOn) return described
+    // The roles' models, from the store: the tool may be described before session.start has read them.
+    const chosen = await $.store.get(MODELS_KEY).then(modelsFrom, () => DEFAULT_MODELS)
 
-    return isOn ? { ...described, description: withTeamDelegation(described.description) } : described
+    return { ...described, description: withTeamDelegation(described.description, chosen) }
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: COMMAND }, async ($, e) => {
@@ -347,6 +354,15 @@ export const register: Register = (on, options) => {
         return ran
       }
       if (e.tool === 'Bash' || e.tool === 'PowerShell') return runTracked($, e, () => next(e), at)
+    }
+    // A team agent runs on the model and effort the person chose for its role, from the next spawn on;
+    // what the call itself names (Claude escalating one task) wins, and a role on its defaults is left alone.
+    // The choices come from the store, as the team paragraph's do: another window's change counts here too.
+    if (e.tool === 'Agent') {
+      const stored = await $.store.get(MODELS_KEY).then(modelsFrom, () => undefined)
+      const chosen = chosenFor(e, stored ?? (await read($, models)))
+
+      return next(chosen === undefined ? e : { ...e, ...chosen })
     }
     // A shell stopped with TaskStop gets no task notification: its answer closes the row.
     if (e.tool === 'TaskStop') {

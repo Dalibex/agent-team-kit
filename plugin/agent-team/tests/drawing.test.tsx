@@ -1,9 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { drawTeam, toolKindOf } from '../hooks/drawing'
+import { drawTeam, FAILED_RESTING, toolKindOf } from '../hooks/drawing'
 import { setLanguage } from '../hooks/i18n'
-import { EMPTY, isAlive, isStill, MAIN_END_MS, STILL_MS } from '../hooks/state'
+import { AFTERGLOW_MS, EMPTY, isAlive, isStill, MAIN_END_MS, STILL_MS } from '../hooks/state'
 import type { AgentRow, MainLoop, Team, Usage } from '../types'
 import { PANE, boot, start } from './support'
 
@@ -53,6 +53,45 @@ test('each sleeping slot snores one z', async () => {
 
 test('the idle pane animates fewer elements than before the change (32)', async () => {
   expect(animations(drawTeam(team(), AT, USAGE))).toBeLessThanOrEqual(16)
+})
+
+// ------------------------------------------------------------ after the afterglow
+
+/** The explorer's slot of a drawing: its frame's stroke and whether its bar is only the track. */
+const explorerSlot = (svg: string): { border: string | undefined; bar: string } => {
+  const slot = svg.split('<g><title>').find(part => part.startsWith('explorer:')) ?? ''
+
+  return { border: /<rect [^>]*rx="12" fill="[^"]+" stroke="([^"]+)"/.exec(slot)?.[1], bar: slot.slice(slot.lastIndexOf('fill="#26222f"')) }
+}
+
+test('a done agent is green in its afterglow, then rests like an empty slot: neutral border and the bare track', async () => {
+  const done = (ago: number): Team => team({}, [agent({ status: 'done', endedAt: AT - ago })], 0)
+  const glowing = explorerSlot(drawTeam(done(1000), AT, USAGE))
+  expect(glowing.border).toBe('#3d6b3d')
+  expect(glowing.bar).toContain('fill="#4caf50"')
+
+  const after = drawTeam(done(AFTERGLOW_MS + 1000), AT, USAGE)
+  const resting = explorerSlot(after)
+  expect(resting.border).toBe('#2e2a3a')
+  expect(resting.bar).not.toContain('fill="#4caf50"')
+  // nothing moves with the clock once it rests: two ticks draw the same
+  expect(drawTeam(done(AFTERGLOW_MS + 2000), AT + 1000, USAGE)).toBe(after)
+  // the end of the afterglow is the edge the ticker redraws on
+  expect(isAlive(done(1000), AT)).toBe(true)
+  expect(isAlive(done(AFTERGLOW_MS + 1000), AT)).toBe(false)
+})
+
+test('a stopped agent rests too; a failed one keeps a dimmed red border and its red bar', async () => {
+  const ended = (status: 'stopped' | 'failed', ago: number): Team => team({}, [agent({ status, endedAt: AT - ago })], 0)
+  expect(explorerSlot(drawTeam(ended('stopped', 1000), AT, USAGE)).border).toBe('#5d5a6b')
+  const stopped = explorerSlot(drawTeam(ended('stopped', AFTERGLOW_MS + 1000), AT, USAGE))
+  expect(stopped.border).toBe('#2e2a3a')
+  expect(stopped.bar).not.toContain('fill="#5d5a6b"')
+
+  expect(explorerSlot(drawTeam(ended('failed', 1000), AT, USAGE)).border).toBe('#d9534f')
+  const failed = explorerSlot(drawTeam(ended('failed', AFTERGLOW_MS + 1000), AT, USAGE))
+  expect(failed.border).toBe(FAILED_RESTING)
+  expect(failed.bar).toContain('fill="#d9534f"')
 })
 
 // ------------------------------------------------------------ a minute at rest
@@ -201,6 +240,24 @@ test('a fresh session breathes: it does not draw the still pose before its first
   await start($)
 
   expect(await sourceOf($)).toContain('type="scale"')
+})
+
+test("the pane's first frame, drawn as it opens, already breathes", async ($, on) => {
+  const world = boot(on)
+  // A frame asked for as the pane opens, drawn while the start still waits on the engine's agent list.
+  let frame: Promise<string> | undefined
+  world.onOpen = async () => {
+    frame ??= sourceOf($)
+  }
+  let first: string | undefined
+  world.onList = async () => {
+    if (frame !== undefined && first === undefined) first = await frame
+  }
+  await start($)
+  await world.clock.settle()
+
+  expect(first).toBeDefined()
+  expect(first).toContain('type="scale"')
 })
 
 test('a turn of tools redraws only when the kind of tool changes, and checks off at the end', async ($, on) => {

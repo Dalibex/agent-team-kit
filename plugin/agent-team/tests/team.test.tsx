@@ -686,3 +686,22 @@ test('a skill another window put in a slot meanwhile does not go in a second one
 
   expect(world.stored.skillSlots).toEqual(['code-review', 'lint', null, null, null, null, null, null])
 })
+
+test("an unfolded agent offers to open its conversation only on the terminal, which draws the main view", async ($, on) => {
+  boot(on)
+  await start($)
+  await spawn($, 'a1', 'agent-team:explorer')
+  await finish($, 'a1')
+  await unfold($, 'a1')
+  const hasView = async (surface: (typeof SURFACES)[number]): Promise<boolean> => {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const found = (await ui.find({ type: 'Button', key: 'view-a1' })) !== undefined
+    // the row is unfolded on both: its copy button is there either way
+    expect(await ui.find({ type: 'Button', key: 'copy-a1' }), surface).toBeDefined()
+    await ui.unmount()
+
+    return found
+  }
+  expect(await hasView('desktop')).toBe(false)
+  expect(await hasView('terminal')).toBe(true)
+})

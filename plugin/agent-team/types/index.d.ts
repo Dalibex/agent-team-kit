@@ -283,9 +283,26 @@ declare module 'claude-code' {
       logged: LoggedMark
       /** Where the session's tokens go: the context breakdown and what the hooks counted; no money, no model call. */
       stats: Shaped<Stats>
+      /** The model and effort each team role runs on; mirrored in `$.store`, so global. */
+      models: TeamModels
     }
   }
 }
+
+/** A model the pane offers a team role, as the Agent tool's `model` names it. */
+export type TeamModel = 'haiku' | 'sonnet' | 'opus'
+
+/** An effort level the pane offers a team role, as the Agent tool's `effort` names it. */
+export type TeamEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** What one team role runs on. */
+export type ModelChoice = { model: TeamModel; effort: TeamEffort }
+
+/** The four roles of the team's own agents. */
+export type TeamRole = 'explorer' | 'implementer' | 'tester' | 'reviewer'
+
+/** The team roles' choices, each one of the four. */
+export type TeamModels = Record<TeamRole, ModelChoice>
 
 /** The newest release of the kit, when it is newer than the plugin that is running. */
 export type UpdateNotice = { version: string; url: string }

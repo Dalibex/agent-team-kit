@@ -8,7 +8,10 @@
     {
       "name": "agent-team",
       "source": "./plugin/agent-team",
-      "description": "Four team agents (explorer, implementer, tester, reviewer) with project context in every brief, and a side pane in tabs: the team at work, usage limits and token spend, skill packs, builds and GitHub state. English and Spanish."
+      "author": {
+        "name": "Dalibex"
+      },
+      "description": "Four team agents (explorer, implementer, tester, reviewer) with project context in every brief and a model and effort you pick per role, and a side pane in tabs: the team at work, usage limits, where the session's tokens go, skill packs, builds and GitHub state. English and Spanish."
     }
   ]
 }
