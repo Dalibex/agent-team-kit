@@ -20,7 +20,7 @@ export const PANE = {
 export const SPANISH = { LANG: 'es_ES.UTF-8' } as const
 
 /** The version the mocked manifest (`.claude-plugin/plugin.json`) states: the one "running". */
-export const MANIFEST_VERSION = '0.9.2'
+export const MANIFEST_VERSION = '0.9.3'
 
 /**
  * A path as the tests name it: forward slashes and no drive. The engine hands a
@@ -67,6 +67,8 @@ export type World = {
   statuses: (string | undefined)[]
   /** The argv and init of each `$.process.run`, git and gh left out. */
   runs: { argv: readonly string[]; init: ProcessRunInit | undefined }[]
+  /** What a run answers instead of the plain success, when the test says: it may throw (a command that cannot start) or take its time. */
+  onRun: ((argv: readonly string[], init: ProcessRunInit | undefined) => ProcessAnswer | undefined | Promise<ProcessAnswer | undefined>) | undefined
   /** The argv of each git or gh run, joined by spaces. */
   gitRuns: string[]
   /** The init (env, timeout) each git or gh run carried, in step with `gitRuns`. */
@@ -160,6 +162,7 @@ export const boot = (
     closed: [],
     statuses: [],
     runs: [],
+    onRun: undefined,
     gitRuns: [],
     gitInits: [],
     gitAnswers: {},
@@ -262,7 +265,7 @@ export const boot = (
   on('turn.complete', () => ({ text: '' }))
   on('session.receive', (_, e) => ({ text: e.text }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     const done = { isStdoutTruncated: false, isStderrTruncated: false }
     if (e.argv[0] === 'git' || e.argv[0] === 'gh') {
       world.gitRuns.push(e.argv.join(' '))
@@ -272,6 +275,8 @@ export const boot = (
       return { value: { ...answer, ...done } }
     }
     world.runs.push({ argv: e.argv, init: e.init })
+    const custom = await world.onRun?.(e.argv, e.init)
+    if (custom !== undefined) return { value: { ...custom, ...done } }
     // A removal, as the plugin asks for one: `rm -f -- <path>`, or PowerShell with the path in AGENT_TEAM_DELETE.
     const doomed = e.argv[0] === 'rm' ? e.argv[e.argv.length - 1] : e.init?.env?.AGENT_TEAM_DELETE
     if (doomed !== undefined) {

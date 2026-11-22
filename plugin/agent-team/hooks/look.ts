@@ -27,6 +27,13 @@ export const ASLEEP = '#4a4858'
 export const INK = '#1c1c1c'
 export const CARD = '#120f1a'
 export const WARN = '#ffb020'
+/**
+ * An agent that stopped to ask: its slot's border, its "?", its wire's pulses and its row. A vivid violet-magenta,
+ * apart from every role's colour (the reviewer's lavender, the tester's pink) and bright on the card.
+ */
+export const ASK = '#e040fb'
+/** The cross over a toggle that is off. */
+export const OFF = '#ff5c5c'
 
 export const STATUS_MARK: Record<AgentStatus, string> = { running: '●', done: '✓', failed: '✗', stopped: '■' }
 export const statusText = (status: AgentStatus): string => t(`status.${status}`)
@@ -154,10 +161,30 @@ export const neonWord = (word: string, x: number, y: number, p: number): string 
   `<g fill="#2a1240" transform="translate(${p * 0.6} ${p * 0.6})">${pixelWord(word, x, y, p)}</g>` +
   `<g fill="url(#dx-ink)" filter="url(#dx-glow)">${pixelWord(word, x, y, p)}</g>`
 
+// ------------------------------------------------------------- motion
+
+/** The drawing's motion curve: ease-in-out, so a move starts and lands softly instead of at a constant speed. */
+export const EASE = '0.45 0 0.55 1'
+/** A gentler curve for fades and blinks of opacity: they swell and ebb rather than ramp. */
+export const SOFT = '0.37 0 0.63 1'
+/** Out of a burst: fast at first, settling at the end (confetti, a check drawn on). */
+export const EASE_OUT = '0.2 0.7 0.35 1'
+
+/**
+ * The timing attributes of a SMIL animation with `count` keyframes: their
+ * `keyTimes` (evenly spaced unless given) and one spline of `curve` per
+ * interval, so every stretch between two keyframes is eased.
+ */
+export const spline = (count: number, curve: string = EASE, times?: readonly number[]): string => {
+  const at = times ?? Array.from({ length: count }, (_, i) => i / (count - 1))
+
+  return `keyTimes="${at.map(n => Number(n.toFixed(3))).join(';')}" calcMode="spline" keySplines="${Array.from({ length: count - 1 }, () => curve).join(';')}"`
+}
+
 /** A four-pointed star that twinkles. */
 export const twinkle = (x: number, y: number, r: number, color: string, dur: number, begin: number): string =>
   `<path d="M${x},${y - r} L${x + r * 0.28},${y - r * 0.28} L${x + r},${y} L${x + r * 0.28},${y + r * 0.28} L${x},${y + r} L${x - r * 0.28},${y + r * 0.28} L${x - r},${y} L${x - r * 0.28},${y - r * 0.28}Z" fill="${color}" opacity="0">` +
-  `<animate attributeName="opacity" values="0;1;0" dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/></path>`
+  `<animate attributeName="opacity" values="0;1;0" ${spline(3, SOFT)} dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/></path>`
 
 /**
  * Faint dots, placed the same every draw so the drawing stays stable; they
@@ -179,7 +206,7 @@ export const starfield = (W: number, H: number, isLive: boolean): string => {
     out.push(
       isLive
         ? `<rect x="${x}" y="${y}" width="2" height="2" fill="#ffffff" opacity="0.08">` +
-            `<animate attributeName="opacity" values="0.06;0.45;0.06" dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/></rect>`
+            `<animate attributeName="opacity" values="0.06;0.45;0.06" ${spline(3, SOFT)} dur="${dur}s" begin="${begin}s" repeatCount="indefinite"/></rect>`
         : `<rect x="${x}" y="${y}" width="2" height="2" fill="#ffffff" opacity="0.18"/>`,
     )
   }

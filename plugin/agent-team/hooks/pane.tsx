@@ -6,10 +6,10 @@ import { jobTitle } from './jobs'
 import { t, tn } from './i18n'
 import { kilo, levelOf, percentText, projectionOf, refreshContext, resetClock, roundTokens, windowShort } from './usage'
 import { barCells, cacheShare, contextPercent, inTokens, NO_STATS, STATS_SHAPE, toolItems, topRest } from './stats'
-import { choose, compactNow, copyText, createPack, cycleEffort, cycleModel, deletePack, openPicker, pickerBack, pickGroup, quietly, refreshGit, resetModels, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, togglePack, toggleSkillEdit, turnPage, viewAgent } from './actions'
+import { choose, compactNow, copyText, createPack, cycleEffort, cycleModel, deletePack, isWaitingForReload, openPicker, pickerBack, pickGroup, pressUpdateNow, quietly, refreshGit, resetModels, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, toggleNotify, togglePack, toggleSkillEdit, toggleSound, turnPage, viewAgent } from './actions'
 import { drawTeam, gaugesOf, overReadTitle, slotsOf, usageAlt } from './drawing'
-import { BRAND, branding, clockText, titlePlate, COMPACT_AT, CONTEXT_COLOR, DEFAULT_BRANCHES, GIT_COLOR, JOB_MARK, JOB_METER, LEVEL_COLOR, LOOK, meterCols, nameOf, seconds, SKILL_COLOR, SPINNER, STATUS_MARK, statusText, tokenLine, TRACK, USAGE_COLOR, WARN } from './look'
-import { ciMark, DEFAULT_MODELS, EMPTY, familyOf, isCostlier, isDefaultChoice, TEAM_EFFORTS, TEAM_MODELS, TEAM_ROLES, FIRST_TAB, spendParts, NO_PACKS, PACK_NAME_MAX, packDeleteAsk, PACKS_VIEW, freshOf, GIT_SHAPE, groupLabel, groupOf, isOverReading, jobRowsOf, NO_CHOICES, NO_GROUP, NO_IDS, NO_PICKER, NO_SLOTS, NO_UPDATE, PICK_PAGE, ROUNDS_LIMIT, runMark, sessionTokensOf, SHOWN_ROWS, SKILLS_EDIT, slotLabel, TABS, TEAM_SHAPE, USAGE_SHAPE } from './state'
+import { ASK, BRAND, branding, clockText, titlePlate, COMPACT_AT, CONTEXT_COLOR, DEFAULT_BRANCHES, GIT_COLOR, JOB_MARK, JOB_METER, LEVEL_COLOR, LOOK, meterCols, nameOf, OFF, seconds, SKILL_COLOR, SPINNER, STATUS_MARK, statusText, tokenLine, TRACK, USAGE_COLOR, WARN } from './look'
+import { ciMark, DEFAULT_MODELS, EMPTY, familyOf, isCostlier, isDefaultChoice, TEAM_EFFORTS, TEAM_MODELS, TEAM_ROLES, FIRST_TAB, spendParts, NO_PACKS, PACK_NAME_MAX, packDeleteAsk, PACKS_VIEW, freshOf, GIT_SHAPE, groupLabel, groupOf, isAsking, isOverReading, jobRowsOf, NO_CHOICES, NO_GROUP, NO_IDS, NO_PICKER, NO_SLOTS, NO_UPDATE, PICK_PAGE, ROUNDS_LIMIT, runMark, sessionTokensOf, SHOWN_ROWS, SKILLS_EDIT, slotLabel, TABS, TEAM_SHAPE, USAGE_SHAPE } from './state'
 import type { CardId } from './state'
 import { NO_USAGE } from './usage'
 import { NO_GIT } from './github'
@@ -32,11 +32,20 @@ const picker = atom({ plugin: 'agent-team', key: 'picker' } as const, NO_PICKER)
 const updateNotice = atom({ plugin: 'agent-team', key: 'update' } as const, NO_UPDATE)
 const stats = atom({ plugin: 'agent-team', key: 'stats' } as const, NO_STATS, { shape: STATS_SHAPE })
 const models = atom({ plugin: 'agent-team', key: 'models' } as const, DEFAULT_MODELS)
+const soundOn = atom({ plugin: 'agent-team', key: 'soundOn' } as const, true)
+const notifyOn = atom({ plugin: 'agent-team', key: 'notifyOn' } as const, true)
+const updating = atom({ plugin: 'agent-team', key: 'updating' } as const, false)
 
 /** A model as its button names it. */
 const MODEL_LABEL: Record<TeamModel, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
 /** The width of a role's name in the models block, so its buttons line up: the longest name and a space. */
 const ROLE_COLS = 12
+/** The widths of the model and effort buttons, so the columns line up: the longest value ("Sonnet", "medium") and the button's chrome. */
+const MODEL_COLS = 10
+const EFFORT_COLS = 10
+/** The `expanded` ids of the Team tab's two sections; there an id means folded, so both start unfolded. */
+const FOLD_CONFIG = 'fold-config'
+const FOLD_ACTIONS = 'fold-actions'
 
 /**
  * The pane: the drawing (the team and its usage column), the line under it
@@ -63,6 +72,10 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const isDelegating = await read($, delegation)
   const chosenModels = await read($, models)
   const newer = await read($, updateNotice)
+  const isUpdating = await read($, updating)
+  const isAwaitingReload = isWaitingForReload()
+  const isSoundOn = await read($, soundOn)
+  const isNotifyOn = await read($, notifyOn)
   // The usage tab's figures are read only while it is shown: a hidden one is not redrawn by every tool call.
   const counted = shown === 'usage' ? await read($, stats) : NO_STATS
   const cols = meterCols(e.props.bodyColumns)
@@ -72,6 +85,8 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const live = new Set<string>([
     'main',
     SKILLS_EDIT,
+    FOLD_CONFIG,
+    FOLD_ACTIONS,
     ...packList.flatMap(p => (p === null ? [] : [packDeleteAsk(p.id)])),
     ...squad.shells.map(sh => sh.id),
     ...squad.jobs.map(j => j.id),
@@ -152,11 +167,20 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
         ? ciMark(g.pr.checks)
         : undefined
   const chips = [
-    // A newer release of the kit: where to read it and how to get it.
-    newer === null ? null : (
+    // A newer release of the kit: where to read it and how to get it. Once one is installed and waits
+    // for a reload, the chip says only that, whether or not a newer release is still known.
+    newer === null && !isAwaitingReload ? null : (
       <Box key="chip-update" flexDirection="row" flexWrap="wrap" columnGap={1}>
-        <Link href={newer.url} label={t('update.available', { version: newer.version })} />
-        <Text dimColor>{t('update.hint')}</Text>
+        {newer !== null && !isAwaitingReload && <Link href={newer.url} label={t('update.available', { version: newer.version })} />}
+        {/* While an update runs the button is not offered: one press, one update. */}
+        {isAwaitingReload ? (
+          <Text color={WARN}>{t('update.now.reload')}</Text>
+        ) : isUpdating ? (
+          <Text color={WARN}>{t('update.now.busy')}</Text>
+        ) : (
+          <Button key="update-now" label={t('update.now.button')} onPress={() => void pressUpdateNow($)} />
+        )}
+        {!isAwaitingReload && <Text dimColor>{t('update.hint')}</Text>}
       </Box>
     ),
     ...(isTextOnly
@@ -223,6 +247,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const spin = SPINNER[beat % SPINNER.length] ?? '●'
   const workingText = `${spin} ${t('status.running')}${'.'.repeat(1 + (beat % 3))}`
   const busy = squad.agents.filter(a => a.status === 'running').length
+  const asking = squad.agents.filter(isAsking).length
   const recent = [...squad.agents].reverse().slice(0, SHOWN_ROWS)
 
   /** One line: who, a generic state or the task, then time; what unfolds sits under it. */
@@ -252,6 +277,51 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       <Box paddingLeft={2}>{what}</Box>
     </Box>
   )
+
+  /**
+   * The sound and notification switches: one glyph each (a Button holds only
+   * strings and Text), a red cross after it while off. Their label names them.
+   */
+  const glyph = (icon: string, isOn: boolean) =>
+    isOn
+      ? [<Text key="icon">{icon}</Text>]
+      : [
+          <Text key="icon">{icon}</Text>,
+          <Text key="off" color={OFF}>
+            ✕
+          </Text>,
+        ]
+  const toggles = (direction: 'row' | 'column') => (
+    <Box key="toggles" flexDirection={direction} flexShrink={0} rowGap="xs" columnGap={1} {...(direction === 'column' ? { paddingTop: 'sm' as const } : {})}>
+      <Button key="toggle-sound" label={isSoundOn ? t('toggle.sound.on') : t('toggle.sound.off')} onPress={() => void toggleSound($)}>
+        {glyph('♪', isSoundOn)}
+      </Button>
+      <Button key="toggle-notify" label={isNotifyOn ? t('toggle.notify.on') : t('toggle.notify.off')} onPress={() => void toggleNotify($)}>
+        {glyph('🔔', isNotifyOn)}
+      </Button>
+    </Box>
+  )
+
+  /** One of the Team tab's sections: a header that folds it, its arrow and bold title, over its rows. */
+  const section = (id: string, title: string, rows: RenderChildren[]) => {
+    const isFolded = open.includes(id)
+
+    return (
+      <Box key={`${id}-section`} flexDirection="column" rowGap="sm">
+        <Box flexDirection="row">
+          <Button key={id} plain label={title} onPress={() => toggle(id)}>
+            {isFolded ? '▸ ' : '▾ '}
+            <Text bold>{title}</Text>
+          </Button>
+        </Box>
+        {!isFolded && (
+          <Box flexDirection="column" rowGap="sm">
+            {rows}
+          </Box>
+        )}
+      </Box>
+    )
+  }
 
   const teamBody = () => {
     const m = squad.main
@@ -311,6 +381,9 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       const isRunning = a.status === 'running'
       const answer = a.answer ?? ''
       const rounds = a.rounds ?? 0
+      // An agent that stopped to ask reads as asking, its questions first when unfolded, until it is woken again.
+      const asks = isAsking(a)
+      const questions = a.questions ?? []
       const meta = [seconds((a.endedAt ?? at) - a.startedAt), familyOf(a.model), rounds >= 1 ? `↻${rounds}` : undefined]
         .filter((part): part is string => part !== undefined && part !== '')
         .join(' · ')
@@ -323,11 +396,22 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
               dimColor={a.status === 'stopped'}
               bold={isRunning}
             >
-              {`${STATUS_MARK[a.status]} ${nameOf(a.role)}`}
+              {asks ? (
+                <Text color={ASK} bold>
+                  ?
+                </Text>
+              ) : (
+                STATUS_MARK[a.status]
+              )}
+              {` ${nameOf(a.role)}`}
             </Text>,
             isRunning ? (
               <Text color={LOOK[a.role].color} wrap="truncate-end">
                 {workingText}
+              </Text>
+            ) : asks ? (
+              <Text color={ASK} wrap="truncate-end">
+                {t('ask.count', { n: questions.length })}
               </Text>
             ) : (
               <Text dimColor wrap="truncate-end">
@@ -349,10 +433,15 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
           )}
           {isOpen && (
             <Box flexDirection="column" paddingLeft={2}>
+              {questions.map((question, i) => (
+                <Text key={`question-${a.id}-${i}`} color={ASK} wrap="wrap">
+                  {`${i + 1}. ${question}`}
+                </Text>
+              ))}
               <Text wrap="wrap">{a.description}</Text>
               <Text dimColor wrap="wrap">
                 {[
-                  statusText(a.status),
+                  asks ? t('ask.count', { n: questions.length }) : statusText(a.status),
                   isRunning ? a.lastTool : undefined,
                   tn(a.calls, 'agent.tools.one', 'agent.tools.other'),
                   a.tokens === undefined || freshOf(a.tokens) === 0 ? undefined : t('tokens.count', { n: kilo(freshOf(a.tokens)) }),
@@ -392,16 +481,11 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       )
     }
     // The Agent tool's team paragraph is read when a session first draws the tool: a change waits for the next one.
-    rows.push(
+    const config: RenderChildren[] = []
+    config.push(
       <Box key="team-foot" flexDirection="row" columnGap={1}>
         <Box flexShrink={0}>
-          <Button
-            key="delegation"
-            plain
-            dimColor
-            label={isDelegating ? t('delegate.on') : t('delegate.off')}
-            onPress={() => void toggleDelegation($)}
-          />
+          <Button key="delegation" label={isDelegating ? t('delegate.on') : t('delegate.off')} onPress={() => void toggleDelegation($)} />
         </Box>
         <Box flexGrow={1} flexShrink={1}>
           <Text dimColor wrap="wrap">
@@ -412,24 +496,35 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
     )
     // What each team role runs on: two buttons a role, read by the next spawn of its agent.
     const moved = TEAM_ROLES.filter(role => !isDefaultChoice(role, chosenModels[role]))
-    rows.push(
-      <Box key="models" flexDirection="column">
-        <Text bold>{t('models.title')}</Text>
-        <Text dimColor wrap="wrap">
-          {t('models.hint')}
-        </Text>
+    config.push(
+      <Box key="models" flexDirection="column" rowGap="sm">
+        <Box flexDirection="column">
+          <Text bold>{t('models.title')}</Text>
+          <Text dimColor wrap="wrap">
+            {t('models.hint')}
+          </Text>
+        </Box>
         {TEAM_ROLES.map(role => {
           const choice = chosenModels[role]
 
+          // Each piece in a box of its own width, so the roles' columns line up; a narrow pane wraps them.
           return (
             <Box key={`models-${role}`} flexDirection="row" flexWrap="wrap" columnGap={1}>
               <Box width={ROLE_COLS} flexShrink={0}>
                 <Text color={LOOK[role].color}>{nameOf(role)}</Text>
               </Box>
               {/* The desktop app draws a button's label, so the label is the value itself: what the press changes. */}
-              <Button key={`model-${role}`} label={MODEL_LABEL[choice.model]} onPress={() => void cycleModel($, role)} />
-              <Button key={`effort-${role}`} label={choice.effort} onPress={() => void cycleEffort($, role)} />
-              {isDefaultChoice(role, choice) && <Text dimColor>{t('models.default')}</Text>}
+              <Box width={MODEL_COLS} flexShrink={0}>
+                <Button key={`model-${role}`} label={MODEL_LABEL[choice.model]} onPress={() => void cycleModel($, role)} />
+              </Box>
+              <Box width={EFFORT_COLS} flexShrink={0}>
+                <Button key={`effort-${role}`} label={choice.effort} onPress={() => void cycleEffort($, role)} />
+              </Box>
+              {isDefaultChoice(role, choice) && (
+                <Box flexShrink={0}>
+                  <Text dimColor>{t('models.default')}</Text>
+                </Box>
+              )}
             </Box>
           )
         })}
@@ -446,7 +541,8 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
       </Box>,
     )
 
-    return rows
+    // The team's settings first, under the card's title; then what Claude and its agents do.
+    return [section(FOLD_CONFIG, t('section.config'), config), section(FOLD_ACTIONS, t('section.actions'), rows)]
   }
 
   // ----------------------------------------------------- the skills
@@ -1233,7 +1329,8 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   // when there is news there, a short count, so a hidden tab still speaks.
   const ctxPercent = u.context?.percent ?? (counted.context === undefined ? 0 : contextPercent(counted.context))
   const TAB_LOOK: Record<CardId, { label: string; accent: string; badge: string }> = {
-    team: { label: t('tab.team'), accent: BRAND[0], badge: busy > 0 ? `●${busy}` : '' },
+    // Agents waiting for answers speak from a hidden tab too.
+    team: { label: t('tab.team'), accent: BRAND[0], badge: [busy > 0 ? `●${busy}` : '', asking > 0 ? `?${asking}` : ''].filter(b => b !== '').join(' ') },
     skills: { label: t('tab.skills'), accent: SKILL_COLOR, badge: picked.length + packsPicked > 0 ? `✦${picked.length + packsPicked}` : '' },
     jobs: { label: t('tab.jobs'), accent: BRAND[1], badge: runningJobs.length > 0 ? `⟳${runningJobs.length}` : '' },
     github: { label: t('tab.github'), accent: BRAND[2], badge: ci?.mark ?? '' },
@@ -1281,24 +1378,32 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
 
     return (
       <Box flexDirection="column" gap={1}>
-        <Text color={LOOK.main.color} bold>
-          {`▄▀▄ ${branding.word} TEAM ▄▀▄`}
-        </Text>
+        <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+          <Text color={LOOK.main.color} bold>
+            {`▄▀▄ ${branding.word} TEAM ▄▀▄`}
+          </Text>
+          {toggles('row')}
+        </Box>
         <Text color={LOOK.main.color} bold>
           {'      [•_•] Claude'}
         </Text>
         <Text dimColor>{'        │'}</Text>
         <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-          {slots.map((slot, i) => (
-            <Text
-              key={`slot-${slot.role}-${slot.agent?.id ?? i}`}
-              color={slot.agent?.status === 'running' ? LOOK[slot.role].color : undefined}
-              dimColor={slot.agent?.status !== 'running'}
-            >
-              {slot.agent?.status === 'running' ? '[•_•]' : '[-_-]'} {nameOf(slot.role)}
-              {slot.running > 1 ? ` ×${slot.running}` : ''}
-            </Text>
-          ))}
+          {slots.map((slot, i) => {
+            // An agent that stopped to ask is awake, in purple, with a "?" until it is continued.
+            const asks = slot.agent !== undefined && isAsking(slot.agent)
+
+            return (
+              <Text
+                key={`slot-${slot.role}-${slot.agent?.id ?? i}`}
+                color={asks ? ASK : slot.agent?.status === 'running' ? LOOK[slot.role].color : undefined}
+                dimColor={!asks && slot.agent?.status !== 'running'}
+              >
+                {slot.agent?.status === 'running' ? '[•_•]' : asks ? '[•_•]?' : '[-_-]'} {nameOf(slot.role)}
+                {slot.running > 1 ? ` ×${slot.running}` : ''}
+              </Text>
+            )
+          })}
         </Box>
         {cards}
       </Box>
@@ -1322,33 +1427,36 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
 
   return (
     <Box flexDirection="column" rowGap="sm" paddingX={1} paddingY="xs">
-      <Box key="drawing" flexDirection="column">
-        <Svg
-          source={drawTeam(squad, at, u)}
-          alt={t('alt.drawing', { title: branding.title, usage: usageAlt(u) })}
-          width={width}
-        />
-        {tips.length > 0 && (
-          <Box
-            position="absolute"
-            bottom={0}
-            right={0}
-            width={tipWidth}
-            display="none"
-            hover={{ display: 'flex' }}
-            flexDirection="column"
-            borderStyle="round"
-            borderColor={CONTEXT_COLOR}
-            backgroundColor="#1b1726"
-            paddingX={1}
-          >
-            {tips.map((tip, i) => (
-              <Text key={`drawing-tip-${i}`} dimColor={i > 0} wrap="wrap">
-                {tip}
-              </Text>
-            ))}
-          </Box>
-        )}
+      <Box key="drawing" flexDirection="row" columnGap={1} alignItems="flex-start">
+        {toggles('column')}
+        <Box key="drawing-art" flexDirection="column" flexGrow={1} flexShrink={1}>
+          <Svg
+            source={drawTeam(squad, at, u)}
+            alt={t('alt.drawing', { title: branding.title, usage: usageAlt(u) })}
+            width={width}
+          />
+          {tips.length > 0 && (
+            <Box
+              position="absolute"
+              bottom={0}
+              right={0}
+              width={tipWidth}
+              display="none"
+              hover={{ display: 'flex' }}
+              flexDirection="column"
+              borderStyle="round"
+              borderColor={CONTEXT_COLOR}
+              backgroundColor="#1b1726"
+              paddingX={1}
+            >
+              {tips.map((tip, i) => (
+                <Text key={`drawing-tip-${i}`} dimColor={i > 0} wrap="wrap">
+                  {tip}
+                </Text>
+              ))}
+            </Box>
+          )}
+        </Box>
       </Box>
       {cards}
     </Box>

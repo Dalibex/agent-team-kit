@@ -6,6 +6,47 @@ All notable changes to agent-team-kit. The format follows
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-22
+
+### Added
+
+- An agent that stops with `QUESTIONS:` (or `PREGUNTAS:`) shows as asking
+  instead of done: its slot turns violet with a "?" over the sprite, its
+  pulse back to Claude is violet, and its row reads "asking (N)" and lists
+  the questions when unfolded. It stays so until Claude continues it (the
+  pulse that wakes it is violet too), Claude sends a new agent of that role
+  instead, or a `/clear` starts a new conversation. The Team tab's button
+  counts the agents asking (`?1`), the terminal's team line marks them, the
+  session log calls them asking, and a long run's system notification says
+  it is asking.
+- Two switches at the left of the drawing (on the title's line in a
+  terminal) mute the pane's sounds and turn off its system notifications;
+  both are remembered across sessions.
+- An "Update now" button in the update chip, and `/agent-team update`, which
+  ask GitHub for the latest release at once and, when it is newer, run the
+  marketplace and plugin updates, then reload the plugins when the session
+  offers `/reload-plugins` (or ask you to run it).
+
+### Changed
+
+- The drawing's motion is smoother: moves ease in and out instead of
+  running at a constant speed, fades swell softly, and the error shake is a
+  small wobble that dies down instead of jumping whole pixels.
+- The Team tab has two sections that fold: "Team", with the Delegate switch
+  and the Models block, first; then "Team actions", with Claude's and the
+  agents' rows. Rows are spaced further apart.
+- The Delegate switch looks like a button.
+- The Models block's columns line up from row to row.
+
+### Fixed
+
+- Two quick presses in the Models block each apply, instead of the second
+  overwriting the first.
+- A window's Models block shows the choices another window made, once the
+  Agent tool is described or called.
+- The thought bubble's dots and the hammer's sparks had key times SMIL does
+  not accept (they did not end at 1), so a surface could skip or freeze them.
+
 ## [0.9.2] - 2026-11-22
 
 ### Fixed

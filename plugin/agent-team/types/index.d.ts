@@ -49,6 +49,10 @@ export type AgentRow = {
   spent?: Tokens
   /** The engine's id of its current or last turn: an end under another id is a round whose start was missed. */
   turnId?: string
+  /** The questions of its last report, when that report opened with `QUESTIONS:`: it waits for answers until woken again. */
+  questions?: string[]
+  /** Set while the current round was woken to answer its questions; cleared when it ends. */
+  answering?: boolean
 }
 
 /** What the session log already holds, so a later entry (after /clear or a resume, the process living on) repeats nothing. */
@@ -285,6 +289,12 @@ declare module 'claude-code' {
       stats: Shaped<Stats>
       /** The model and effort each team role runs on; mirrored in `$.store`, so global. */
       models: TeamModels
+      /** Whether the pane plays its sounds; kept in `$.store` across sessions. */
+      soundOn: boolean
+      /** Whether the pane raises system notifications; kept in `$.store` across sessions. */
+      notifyOn: boolean
+      /** True while "Update now" runs: the chip shows it and a second press does nothing. */
+      updating: boolean
     }
   }
 }

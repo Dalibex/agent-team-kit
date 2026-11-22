@@ -63,7 +63,8 @@ Four agents ship inside the plugin, and Claude sees them as
   ones its task needs.
 - **Questions go up, not sideways.** An agent that lacks something stops and
   answers `QUESTIONS:`. Claude continues that same agent with SendMessage, so
-  it keeps what it already read, or asks you when the decision is yours.
+  it keeps what it already read, or asks you when the decision is yours. The
+  pane shows such an agent as asking, in violet, until it is continued.
 - **Delegation.** Out of the box, Claude Code's Agent tool tells Claude not to
   delegate unless asked. The plugin replaces that paragraph with one that
   presents the team and points to your rules. The Delegate switch in the Team
@@ -76,14 +77,17 @@ until it gets a task, works while it runs and finishes with confetti and a
 sound of its own. Beside it, your usage limits: the 5-hour window with the
 time it fills at the current pace, the weekly window and the session's
 context, amber at 80 % and red at 95 %, with details on hover and a button to
-compact the context.
+compact the context. At its left, two switches mute the pane's sounds and
+turn off its system notifications; both are remembered.
 
 Under the drawing, one tab at a time; a hidden tab's button flags what is
 happening in it, and the open tab is remembered.
 
-- **Team**: tokens spent per role this session and the team's share; one row
-  per agent with its task, time, model and the skills it loaded; its brief,
-  tokens and report when unfolded. Rows also flag waste: a brief without Goal
+- **Team**: two sections that fold. "Team" holds the Delegate switch and the
+  Models block; "Team actions" has one row for Claude and one per agent with
+  its task, time, model and the skills it loaded; its brief, tokens and
+  report when unfolded. An agent that stopped with `QUESTIONS:` reads
+  "asking (N)" and lists its questions when unfolded. Rows also flag waste: a brief without Goal
   or Why, a repeated brief that could have continued an agent, an Opus review
   of a change of ten lines or fewer, and Claude reading more than five files
   without the explorer.
@@ -148,7 +152,11 @@ the desktop app:
 
 ## Update and uninstall
 
-The pane tells you when a new version is out. To update, in a terminal:
+The pane tells you when a new version is out, with an "Update now" button;
+typing `/agent-team update` does the same. Both ask GitHub for the latest
+release and, only when it is newer than yours, run the two commands below;
+then they run `/reload-plugins` when your session offers it, or tell you to
+run it. To update by hand, in a terminal:
 
 ```bash
 claude plugin marketplace update agent-team-kit
