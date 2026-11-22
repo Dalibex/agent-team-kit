@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 import type { AgentRow, MainLoop } from '../types'
 import { ciPollMs } from './github'
 import { adopt, afterShell, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, onTaskStop, quietly, readTails, reconcile, refreshGit, refreshStatus, runTracked, scheduleGit, takeUsage, writeRuns } from './actions'
@@ -7,8 +7,9 @@ import { beginLanguage, settleLanguage, t } from './i18n'
 import { branding, brandingOf, nameOf, seconds, setBranding } from './look'
 import { UPDATE_MS } from './update'
 import { renderPane } from './pane'
-import { addRun, apiErrorText, COMMAND, contextFor, DELEGATION_KEY, detailOf, editPathOf, isMissedRound, isTeamBrief, TEAM_TYPES, withRead, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, plusTokens, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
+import { addRun, apiErrorText, COMMAND, contextFor, DELEGATION_KEY, detailOf, editPathOf, isMissedRound, isTeamBrief, TEAM_TYPES, withRead, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, isStill, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, plusTokens, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
 import { NO_GIT } from './github'
+import { noteCompaction, noteTool, noteTurnEnd, noteTurnStart, refreshContext } from './usage'
 
 // The state this module reads or writes; refs written here, starts and shapes from state.ts.
 const team = atom({ plugin: 'agent-team', key: 'team' } as const, EMPTY, { shape: TEAM_SHAPE })
@@ -24,6 +25,14 @@ const cwd = atom({ plugin: 'agent-team', key: 'cwd' } as const, '')
 const choices = atom({ plugin: 'agent-team', key: 'choices' } as const, NO_CHOICES)
 const delegation = atom({ plugin: 'agent-team', key: 'delegation' } as const, true)
 const logged = atom({ plugin: 'agent-team', key: 'logged' } as const, NO_LOGGED)
+
+/** Reads the context breakdown again when the usage tab is the one shown: a hidden tab reads it when it opens. */
+const refreshIfShown = ($: EngineInterface): Promise<void> =>
+  quietly(
+    (async () => {
+      if ((await read($, tab)) === 'usage') await refreshContext($)
+    })(),
+  )
 
 export const register: Register = (on, options) => {
   setBranding(brandingOf(options.teamName))
@@ -47,10 +56,15 @@ export const register: Register = (on, options) => {
     )
     if (!wasHidden) void quietly($.ui.open({ id: PANE, title: branding.title }))
     await quietly(adopt($))
+    // The sprites hold a still pose only after a quiet minute: the count starts with the session.
+    const openedAt = await $.clock.now()
+    await quietly(update($, team, t => ({ ...t, main: { ...t.main, openedAt } })))
     const storedDelegation = await $.store.get(DELEGATION_KEY).then(v => v !== false, () => true)
     await quietly(update($, delegation, () => storedDelegation))
     const storedTab = await $.store.get(TAB_KEY).then(tabFrom, () => undefined)
     if (storedTab !== undefined) await quietly(update($, tab, () => storedTab))
+    // The usage tab, when it is the one shown, has its figures from the start.
+    if (storedTab === 'usage') void quietly(refreshContext($))
     // The 0.7 slots are kept as they were: they are the loose skills now.
     const storedSlots = await $.store.get(SLOTS_KEY).then(slotsFrom, () => undefined)
     if (storedSlots !== undefined) await quietly(update($, slots, () => storedSlots))
@@ -76,13 +90,17 @@ export const register: Register = (on, options) => {
     let tailedAt = 0
     let wasAlive = false
     let updatedAt = await $.clock.now()
+    // ...and once when a quiet minute begins, so the sprites are drawn in their still pose.
+    let wasStill = false
     $.clock.every(1000, async () => {
       try {
         const t = await read($, team)
         const at = await $.clock.now()
         const alive = isAlive(t, at)
-        if (alive || wasAlive) await update($, now, () => at)
+        const still = isStill(t, at)
+        if (alive || wasAlive || still !== wasStill) await update($, now, () => at)
         wasAlive = alive
+        wasStill = still
         if (at - checkedAt >= RECONCILE_MS && t.agents.some(a => a.status === 'running')) {
           checkedAt = at
           await quietly(reconcile($, at))
@@ -247,7 +265,14 @@ export const register: Register = (on, options) => {
     return started
   }).catch(($, e, next) => next(e))
 
-  on('tool.call', async ($, e, next) => {
+  on('tool.call', async ($, e, run) => {
+    // Whatever way the call goes on, the size of its result is counted for the usage tab (an estimate off the text's length).
+    const next = async (input: typeof e) => {
+      const ran = await run(input)
+      if (ran.deny === undefined) await quietly(noteTool($, e.tool, ran))
+
+      return ran
+    }
     await settleLanguage($, options.language)
     const at = await $.clock.now()
     // A skill loaded with the Skill tool shows on the row of whoever loaded it.
@@ -334,6 +359,19 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // What each tool's results added to the context, counted by the usage tab: an estimate off the text's length.
+  // Conversations compacted, as the usage tab counts them: a real compaction of the main one, not a precompute or a skip.
+  on('session.compact', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
+      await quietly(noteCompaction($))
+      // The figures of the usage tab, when it is shown, are those of the conversation now.
+      void refreshIfShown($)
+    }
+
+    return done
+  }).catch(($, e, next) => next(e))
+
   // A background task's end reaches the session as a notification: by the
   // delivery event, by the row the transcript keeps, or by the turn it wakes.
   on('session.receive', async ($, e, next) => {
@@ -360,12 +398,13 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     await settleLanguage($, options.language)
     if (e.text.includes('<task-notification>')) await onNotice($, e.text, 'turn.start', e.agentId)
+    await quietly(noteTurnStart($, e.text, e.agentId))
     const at = await $.clock.now()
     if (e.agentId === undefined) {
       await quietly(
         update($, team, t => ({
           ...t,
-          main: { ...IDLE_MAIN, status: 'working', since: at, lastTokens: t.main.lastTokens } satisfies MainLoop,
+          main: { ...IDLE_MAIN, status: 'working', since: at, openedAt: t.main.openedAt, lastTokens: t.main.lastTokens } satisfies MainLoop,
         })),
       )
     } else {
@@ -436,12 +475,22 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     await settleLanguage($, options.language)
     const tokens = tokensOf(e.usage)
+    await quietly(noteTurnEnd($, { isMain: e.agentId === undefined, durationMs: e.durationMs, tokens }))
     if (e.agentId === undefined) {
       const at = await $.clock.now()
+      const failure = t('end.error')
       await quietly(
         update($, team, t => ({
           ...t,
-          main: { ...t.main, status: 'idle', lastTokens: tokens ?? t.main.lastTokens } satisfies MainLoop,
+          main: {
+            ...t.main,
+            status: 'idle',
+            // Any end is a moment of activity; the check over Claude marks only a turn that answered, and an API error draws the shake instead.
+            endedAt: at,
+            endedOk: e.reason === 'answer',
+            ...(e.reason === 'error' && t.main.apiError === undefined ? { apiError: failure } : {}),
+            lastTokens: tokens ?? t.main.lastTokens,
+          } satisfies MainLoop,
           totals: addRun(t.totals, 'main', tokens),
           jobs: stopLeftovers(t.jobs, undefined, at),
         })),
@@ -493,6 +542,9 @@ export const register: Register = (on, options) => {
         void announce($, `${t(status === 'done' ? 'notify.done' : 'notify.failed', { what, time: seconds(e.durationMs) })}: ${missed.description}`)
       }
     }
+
+    // Claude's own turn ended: the tab, if shown, reads its breakdown again (the engine's estimate, no request), off the turn's path.
+    if (e.agentId === undefined) void refreshIfShown($)
 
     return next(e)
   }).catch(($, e, next) => next(e))

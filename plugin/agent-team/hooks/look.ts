@@ -194,6 +194,8 @@ export const TRACK = '━'
 export const LEVEL_COLOR: Record<Level, string> = { calm: BRAND[3], warm: WARN, hot: '#ff5c5c' }
 export const CONTEXT_COLOR = '#a66bff'
 export const SKILL_COLOR = '#ffd166'
+/** The usage tab's colour: a sky blue, apart from the roles' and the other tabs'. */
+export const USAGE_COLOR = '#7dd3fc'
 /** Branches a pull request is usually opened into, never from: no "Crear PR" on them. */
 export const DEFAULT_BRANCHES = new Set(['main', 'master', 'develop', 'dev', 'trunk'])
 /** Past this share of the context window, the pane offers to compact it. */

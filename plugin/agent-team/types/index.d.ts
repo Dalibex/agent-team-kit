@@ -115,6 +115,12 @@ export type MainLoop = {
   calls: number
   lastTool?: string
   lastDetail?: string
+  /** When the session opened: the count of a quiet minute starts there. */
+  openedAt?: number
+  /** When the last turn ended, whatever the reason; cleared when the next turn starts. */
+  endedAt?: number
+  /** Whether that turn ended with an answer: only then the drawing checks Claude off. */
+  endedOk?: boolean
   /** The last tool calls of the current turn, newest last. */
   log: string[]
   /** The distinct files Claude itself read this turn, the ones it also edited or wrote left out. */
@@ -250,7 +256,7 @@ declare module 'claude-code' {
       usage: Shaped<Usage>
       git: Shaped<GitInfo>
       /** The tab shown under the drawing; kept in `$.store` across sessions. */
-      tab: 'team' | 'skills' | 'jobs' | 'github'
+      tab: 'team' | 'skills' | 'jobs' | 'github' | 'usage'
       /** The eight skill slots, a slash command's name or null; mirrored in `$.store`, so global. */
       slots: (string | null)[]
       /** The slot skills picked: every prompt the person sends carries them until they are unpicked. */
@@ -275,6 +281,8 @@ declare module 'claude-code' {
       skillView: SkillView
       /** What the session log already holds; empty until the first entry is written. */
       logged: LoggedMark
+      /** Where the session's tokens go: the context breakdown and what the hooks counted; no money, no model call. */
+      stats: Shaped<Stats>
     }
   }
 }
@@ -313,3 +321,47 @@ export type SlotPicker = { slot: number; pack?: string; group?: string; page: nu
 
 /** The skills tab's view. */
 export type SkillView = { kind: 'packs' } | { kind: 'loose' } | { kind: 'pack'; id: string }
+
+/** One line of the usage tab's lists: a plugin, a server, a file or an agent, its tokens and how many items it groups. */
+export type StatItem = { name: string; tokens: number; count?: number }
+
+/** One row of the context window's breakdown. */
+export type ContextRow = { name: string; tokens: number; kind: 'used' | 'free' | 'buffer' }
+
+/** The context window as the engine's summary breakdown counted it (estimates), trimmed to what the tab draws. */
+export type ContextView = {
+  /** Tokens in use and the window they are measured against. */
+  used: number
+  window: number
+  rows: ContextRow[]
+  /** Skills grouped by plugin (else by source), MCP tools by server (loaded ones), memory files, custom agents; biggest first. */
+  skills: StatItem[]
+  mcp: StatItem[]
+  /** MCP tools not loaded yet (their schemas wait to be asked for). */
+  mcpDeferred: number
+  memory: StatItem[]
+  agents: StatItem[]
+}
+
+/** One main turn, kept while it is among the three that used most. */
+export type TurnStat = { n: number; tokens: number; ms: number; prompt?: string }
+
+/** Where the session's tokens go, as the hooks counted them. */
+export type Stats = {
+  /** The last breakdown; undefined until the first one was read. */
+  context?: ContextView
+  /** Every turn of the session, agents' included: uncached input, cache writes and reads, output. */
+  input: number
+  cacheWrite: number
+  cacheRead: number
+  output: number
+  /** Claude's own turns, and the compactions that ran. */
+  turns: number
+  compactions: number
+  /** The first words of the prompt the running turn answers. */
+  prompt?: string
+  /** Per tool name, the estimated tokens its results added (length / 4) and its calls; bounded. */
+  tools: Record<string, { tokens: number; calls: number }>
+  /** The three most expensive main turns, biggest first. */
+  top: TurnStat[]
+}

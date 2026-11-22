@@ -63,8 +63,8 @@ export const packDeleteAsk = (id: string): string => `pack-delete-${id}`
 // Change the tag when a row's fields change: it declines what an earlier
 
 /** The tabs under the drawing, each one card, in the order their buttons are drawn. */
-export type CardId = 'team' | 'skills' | 'jobs' | 'github'
-export const TABS: readonly CardId[] = ['team', 'skills', 'jobs', 'github']
+export type CardId = 'team' | 'skills' | 'jobs' | 'github' | 'usage'
+export const TABS: readonly CardId[] = ['team', 'skills', 'jobs', 'github', 'usage']
 /** Kept in `$.store` across sessions: the tab last shown. */
 export const TAB_KEY = 'tab'
 export const FIRST_TAB: CardId = 'team'
@@ -139,8 +139,14 @@ export const familyOf = (model: string | undefined): string | undefined => {
   return /haiku|sonnet|opus|fable/i.exec(model)?.[0].toLowerCase() ?? model
 }
 
+/** How long Claude's own end of turn (the check, the shake) stays drawn. */
+export const MAIN_END_MS = 2500
+/** With nothing live for this long the sprites hold a still pose, to spare the idle pane's CPU. */
+export const STILL_MS = 60 * 1000
+
 export const isAlive = (t: Team, at: number): boolean =>
   t.main.status === 'working' ||
+  (t.main.endedAt !== undefined && at - t.main.endedAt < MAIN_END_MS) ||
   t.agents.some(
     a =>
       a.status === 'running' ||
@@ -148,6 +154,23 @@ export const isAlive = (t: Team, at: number): boolean =>
   ) ||
   t.shells.some(s => isShellShown(s, at)) ||
   t.jobs.some(j => j.status === 'running')
+
+/** The latest moment anything of the team started, moved or ended; 0 when nothing did yet. */
+export const lastActivityOf = (t: Team): number =>
+  Math.max(
+    t.main.since,
+    t.main.endedAt ?? 0,
+    t.main.openedAt ?? 0,
+    ...t.agents.map(a => Math.max(a.startedAt, a.endedAt ?? 0, a.lastActiveAt)),
+    ...t.shells.map(s => Math.max(s.startedAt, s.endedAt ?? 0, s.lastNewsAt ?? 0)),
+    ...t.jobs.map(j => Math.max(j.startedAt, j.endedAt ?? 0)),
+  )
+
+/**
+ * Whether nothing has been live for STILL_MS: the sprites then hold a still
+ * pose. The session's opening counts as activity.
+ */
+export const isStill = (t: Team, at: number): boolean => !isAlive(t, at) && at - lastActivityOf(t) >= STILL_MS
 
 /**
  * Adds rows, or fills in the ones already there by id (a spawn the pane

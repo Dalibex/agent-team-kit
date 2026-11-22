@@ -1,7 +1,12 @@
-import type { SessionContextUsage, SessionRateLimit } from 'claude-code'
+import { atom, update } from 'claude-code'
+import type { EngineInterface, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
-import type { LimitWindow, Trail, Usage } from '../types'
+import type { LimitWindow, Tokens, Trail, Usage } from '../types'
 import { t } from './i18n'
+import { contextOf, NO_STATS, promptWords, resultTokens, STATS_SHAPE, withToolResult, withTurnEnd } from './stats'
+
+// The state this module writes: what the usage tab counts (see stats.ts for the pure part).
+const stats = atom({ plugin: 'agent-team', key: 'stats' } as const, NO_STATS, { shape: STATS_SHAPE })
 
 export const NO_USAGE: Usage = { at: 0, windows: [] }
 
@@ -203,3 +208,63 @@ export const kilo = (n: number): string =>
 /** A token count rounded for a tight spot, as a window size is spoken of: 62k, 400k, 1M, 1.5M. */
 export const roundTokens = (n: number): string =>
   n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(1))}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
+
+// ------------------------------------------------------------ the usage tab's figures
+
+/** A breakdown being read, and whether another was asked meanwhile: it runs once more when this one settles. */
+let isReading = false
+let isAgain = false
+
+/**
+ * Reads the context breakdown again, the engine's own estimate (`summary`: no
+ * request is made). Asked at the end of a turn and when the tab is opened,
+ * never on the ticker.
+ */
+export async function refreshContext($: EngineInterface): Promise<void> {
+  if (isReading) {
+    isAgain = true
+
+    return
+  }
+  isReading = true
+  try {
+    const raw = (await $.session.usage({ breakdown: 'summary' })).context.breakdown
+    if (raw !== undefined) await update($, stats, s => ({ ...s, context: contextOf(raw) }))
+  } finally {
+    isReading = false
+  }
+  if (isAgain) {
+    isAgain = false
+    await refreshContext($)
+  }
+}
+
+/** A turn began: its prompt's first words go with it when it ends. */
+export async function noteTurnStart($: EngineInterface, text: string, agentId: string | undefined): Promise<void> {
+  if (agentId !== undefined) return
+  const prompt = promptWords(text)
+  await update($, stats, s => {
+    const { prompt: _before, ...rest } = s
+
+    return prompt === undefined ? rest : { ...rest, prompt }
+  })
+}
+
+/** A turn ended: its tokens join the session's, and Claude's own may join the most expensive. */
+export async function noteTurnEnd(
+  $: EngineInterface,
+  turn: { isMain: boolean; durationMs: number; tokens: Tokens | undefined },
+): Promise<void> {
+  await update($, stats, s => withTurnEnd(s, turn))
+}
+
+/** A tool's result came back: what it added to the context, estimated, goes to the tool's tally. */
+export async function noteTool($: EngineInterface, tool: string, ran: { text?: string; result?: unknown }): Promise<void> {
+  const tokens = resultTokens(ran)
+  await update($, stats, s => ({ ...s, tools: withToolResult(s.tools, tool, tokens) }))
+}
+
+/** The conversation was compacted. */
+export async function noteCompaction($: EngineInterface): Promise<void> {
+  await update($, stats, s => ({ ...s, compactions: s.compactions + 1 }))
+}

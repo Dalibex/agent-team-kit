@@ -20,7 +20,7 @@ export const PANE = {
 export const SPANISH = { LANG: 'es_ES.UTF-8' } as const
 
 /** The version the mocked manifest (`.claude-plugin/plugin.json`) states: the one "running". */
-export const MANIFEST_VERSION = '0.8.7'
+export const MANIFEST_VERSION = '0.9.0'
 
 /**
  * A path as the tests name it: forward slashes and no drive. The engine hands a
@@ -117,6 +117,8 @@ export type World = {
   notified: string[]
   /** How many times `$.session.compact` was asked. */
   compactions: number
+  /** Whether a compaction runs (its summary is the one message); by default the test engine skips it. */
+  isCompacting: boolean
   /** What `$.command.list` answers. */
   commands: CommandInfo[]
   /** Each prompt that reached the bottom of `prompt.submit`: its text and the context hooks added. */
@@ -178,6 +180,7 @@ export const boot = (
     toolResult: undefined,
     notified: [],
     compactions: 0,
+    isCompacting: false,
     commands: [],
     submitted: [],
     stored: { ...options.store },
@@ -289,7 +292,7 @@ export const boot = (
   on('session.compact', () => {
     world.compactions += 1
 
-    return { skip: 'probado desde el test' }
+    return world.isCompacting ? { messages: [{ role: 'user', text: 'summary', toolUses: [] }] } : { skip: 'probado desde el test' }
   })
   on('ui.toast', (_, e) => {
     world.toasts.push(e.text)
@@ -423,7 +426,7 @@ export const finish = (
 
 export const start = ($: Engine) => $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
 
-export const TAB_IDS = ['team', 'skills', 'jobs', 'github'] as const
+export const TAB_IDS = ['team', 'skills', 'jobs', 'github', 'usage'] as const
 
 /** Shows a tab, as a press on its button does. */
 export const onTab = async ($: Engine, id: (typeof TAB_IDS)[number]): Promise<void> => {
