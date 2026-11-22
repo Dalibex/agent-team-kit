@@ -18,7 +18,17 @@ What you see:
   down its wire, it wakes up and does its thing: the explorer sweeps a torch,
   the implementer swings a hammer, the tester's test tube bubbles and the
   reviewer reads a page. When it finishes, confetti and a check (or a shake
-  and a red mark if it failed).
+  and a red mark if it failed). An agent whose report opens with
+  `QUESTIONS:` or `PREGUNTAS:` (bold or as a heading too) is asking: its
+  slot's border turns violet with a "?" over the sprite, and its pulse back
+  up the wire is violet; both hold until Claude continues it with
+  SendMessage, whose pulse down the wire is violet as well, until Claude
+  sends a new agent of that role instead, or until a `/clear`. An asking
+  agent's row is kept in the history like a running one.
+- At the drawing's left, two switches: ♪ mutes the pane's sounds and 🔔
+  turns off its system notifications (toasts still show); a red ✕ marks one
+  that is off. Both are kept in the store (`soundOn`, `notifyOn`). On the
+  terminal they sit on the title's line.
 - At the right of the team, in the same drawing and neon pixel style, a
   usage column: the 5-hour and weekly windows (LED bars, with the time each
   resets) and the context as tokens over the window (30K/400K, 62K/1M). The
@@ -49,7 +59,10 @@ What you see:
   (`Equipo ●2`, `Skills ✦3`, `Procesos ⟳1`, `GitHub ✗`), and the tab shown
   is kept in the store, so the next session opens on it. The card is titled
   like the drawing (its name in neon pixel letters) and framed in its colour.
-  - **Equipo**: one line per member: Claude, then the recent agents, the
+  - **Equipo**: two sections, each folded or unfolded with its header's
+    arrow (both start unfolded). **Team** holds the Delegate switch and the
+    Models block (see The team, below). **Team actions** has one line per
+    member: Claude, then the recent agents, the
     whole history of 16. A working one reads "working…" with
     a spinner and moving dots; a finished one shows its task in one line;
     then its time and model, and under it, in skill colour, the skills it
@@ -63,8 +76,11 @@ What you see:
     brief without Goal or Why, a brief that repeats (60 % of its words) one
     the same role finished in the last 20 minutes, which SendMessage could
     have continued, or a reviewer sent on a diff of ten lines or fewer
-    (`git diff --shortstat HEAD`, read off the spawn's path). At the foot,
-    the Delegate switch and the Models block (see The team, below).
+    (`git diff --shortstat HEAD`, read off the spawn's path). An agent
+    that stopped to ask reads "asking (N)" in violet with a "?" instead of
+    its task (the tab's button adds `?N` for them, the terminal's team line a
+    "?", the session log the status "asking"), and unfolding it lists its questions above the brief; a long
+    run's system notification says it is asking rather than finished.
   - **Skills**: twelve pack slots, two to a row. An empty one (＋) makes a
     pack and opens it: its name in a text field, saved as it is typed (one
     line, up to 24 characters), and twenty-four skill slots, each filled with the
@@ -144,7 +160,7 @@ The Models block ("Modelos"), under the Delegate switch, chooses what each
 role runs on: one row per role with its name, a model button (Haiku → Sonnet →
 Opus) and an effort button (low → medium → high → xhigh → max), each
 button showing its value and each press
-moving to the next value; "por defecto" marks a role still on what its agent
+moving to the next value, the columns lined up from row to row; "por defecto" marks a role still on what its agent
 file says (explorer Haiku/low, implementer and tester Sonnet/medium, reviewer
 Opus/high), and "Restablecer", shown once a role was moved, puts all four
 back. A role moved up to Opus, or to an effort above its default, adds a
@@ -152,7 +168,10 @@ dim line: it uses more of the 5-hour and weekly limits. The
 choice is yours, not a project's: it is kept in the plugin's store
 (`teamModels`) for every project and session, the one copy every open window
 reads and writes (a press applies to what the store holds, so another
-window's choice is kept), and applies from the next spawn, with no restart.
+window's choice is kept; quick presses are applied one after another, so none
+is lost), and applies from the next spawn, with no restart. When the Agent
+tool is described or called, the pane reads the store again, so a window
+shows the choices another one made.
 Only Agent tool calls are covered: a workflow script's `agent()` and a
 plugin's `$.agent.spawn` run on the agent file's settings. A model that takes
 no effort setting may ignore the chosen effort. A `tool.call` hook on the Agent tool
@@ -198,7 +217,8 @@ Spanish locale. Text the model reads (briefs, the Agent tool's paragraph, the
 team rules) stays English. The quotes in this README are the English texts.
 
 Sounds: each role has its own short clip in `sounds/`, plus a soft one for
-failures. Interrupted agents make no sound. On Windows the clip is played by
+failures. Interrupted agents make no sound, and none plays while the ♪
+switch is muted. On Windows the clip is played by
 starting `powershell.exe` with `Media.SoundPlayer` (the engine has no audio
 player there); elsewhere by the engine.
 
@@ -206,7 +226,22 @@ Rows whose end the pane missed are closed every 15 seconds from the engine's
 own agent list, or after 10 minutes without news.
 
 `/agent-team` hides or shows the pane, and the choice is remembered in later
-sessions. The mod calls no model and costs no tokens.
+sessions.
+
+Updates: once a day (the `updateCheck` option) the pane asks GitHub for the
+kit's latest release and, when it is newer, shows a chip with its link, the
+commands and an "Update now" button; typing `/agent-team update` does the
+same (only when you type it: not from a plugin, a schedule or a message).
+Either asks GitHub again at once, skipping the day's cache, and with a newer
+release runs `claude plugin marketplace update agent-team-kit` and `claude
+plugin update agent-team@agent-team-kit` (no shell; on Windows, when `claude`
+cannot be started by name, through `cmd.exe` once), then, once the
+update has answered, runs `/reload-plugins` when the session lists it, or
+tells you to run it (as it does when the reload is refused). From then on
+the chip asks only for /reload-plugins, with no button, even when the daily
+check finds the release again, until the plugins are reloaded. A step that fails
+stops the update and says why; while it runs, the chip says so and a second
+press does nothing. The mod calls no model and costs no tokens.
 
 Resources: the drawing, usage band included, is a plain SVG image, not an
 interactive frame: a frame keeps the wheel to itself and the pane would not
@@ -216,7 +251,12 @@ while something is working. The band shows wall-clock reset times, never a
 countdown, so the drawing's markup does not change every minute. The cards
 are text elements; their four pixel titles are plain images built once and
 reused, so they add no frames. A one-second ticker redraws only while
-something is alive.
+something is alive, and a redraw in the same state yields the same markup,
+so the animations are never restarted by the ticker. Every move (bobbing,
+sweeps, the pulses along the wires, the bar glides, the confetti) is eased
+in and out with SMIL splines and fades swell softly; a shake is a small
+wobble that dies down rather than whole-pixel jumps. The sprites stay crisp
+pixel art.
 
 Code, in `hooks/`:
 

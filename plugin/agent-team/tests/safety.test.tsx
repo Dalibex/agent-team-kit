@@ -346,7 +346,7 @@ test('the command is registered with an argument hint', async ($, on) => {
   const world = boot(on, { env: { HOME } })
   await start($)
 
-  expect(world.registered.find(c => c.name === 'agent-team')?.argumentHint).toBe('[rules [off]]')
+  expect(world.registered.find(c => c.name === 'agent-team')?.argumentHint).toBe('[rules [off] | update]')
 })
 
 // ------------------------------------------------------- 11. a reload with no start

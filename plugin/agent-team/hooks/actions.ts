@@ -11,7 +11,7 @@ import { planInstall, planRemove } from './rules'
 import type { UpdateRecord } from './update'
 import { isNewer, manifestVersion, recordFrom, releaseFrom, RELEASE_URL, UPDATE_KEY, UPDATE_MS } from './update'
 import { branding, FAIL_SOUND, LOOK, seconds } from './look'
-import { ARMED_KEY, armedBookFrom, runsFileName, CHIME_GAP_MS, cleanPackName, DELEGATION_KEY, PACK_NAME_MAX, packsFrom, projectKeyOf, reviewWarning, shortstatLines, closeRow, COMMAND, cycled, DEFAULT_MODELS, EMPTY, MODELS_KEY, modelsEntry, modelsFrom, TEAM_EFFORTS, TEAM_MODELS, FIRST_TAB, GIT_SHAPE, isShellRunning, jobEndOf, LONG_MS, namesCommittedWork, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_PICKER, NO_SLOTS, NO_UPDATE, PACK_SIZE, packDeleteAsk, PACKS_KEY, PACKS_VIEW, roleOf, shellOf, shellSound, SKILLS_EDIT, SLOTS_KEY, slotsFrom, STALE_MS, statusOfListed, stopLeftovers, stoppedIdOf, TAB_KEY, TAIL_MAX_BYTES, TEAM_SHAPE, titleOf, TOUCHES_GIT, TRAIL_KEY, USAGE_SHAPE, WARNED_KEY, withArmed, withJob, withRows, withShell } from './state'
+import { ARMED_KEY, armedBookFrom, runsFileName, CHIME_GAP_MS, cleanPackName, DELEGATION_KEY, PACK_NAME_MAX, packsFrom, projectKeyOf, reviewWarning, shortstatLines, closeRow, COMMAND, cycled, DEFAULT_MODELS, EMPTY, MODELS_KEY, modelsEntry, modelsFrom, TEAM_EFFORTS, TEAM_MODELS, FIRST_TAB, GIT_SHAPE, isShellRunning, jobEndOf, LONG_MS, namesCommittedWork, NOTIFY_KEY, SOUND_KEY, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_PICKER, NO_SLOTS, NO_UPDATE, PACK_SIZE, packDeleteAsk, PACKS_KEY, PACKS_VIEW, roleOf, shellOf, shellSound, SKILLS_EDIT, SLOTS_KEY, slotsFrom, STALE_MS, statusOfListed, stopLeftovers, stoppedIdOf, TAB_KEY, TAIL_MAX_BYTES, TEAM_SHAPE, titleOf, TOUCHES_GIT, TRAIL_KEY, USAGE_SHAPE, WARNED_KEY, withArmed, withJob, withRows, withShell } from './state'
 import type { CardId, GitOperation, Ran, ShellCall } from './state'
 import { NO_USAGE } from './usage'
 import { NO_GIT } from './github'
@@ -35,6 +35,9 @@ const delegation = atom({ plugin: 'agent-team', key: 'delegation' } as const, tr
 const cwd = atom({ plugin: 'agent-team', key: 'cwd' } as const, '')
 const updateNotice = atom({ plugin: 'agent-team', key: 'update' } as const, NO_UPDATE)
 const models = atom({ plugin: 'agent-team', key: 'models' } as const, DEFAULT_MODELS)
+const soundOn = atom({ plugin: 'agent-team', key: 'soundOn' } as const, true)
+const notifyOn = atom({ plugin: 'agent-team', key: 'notifyOn' } as const, true)
+const updating = atom({ plugin: 'agent-team', key: 'updating' } as const, false)
 
 /** Pins one line under the prompt with what is alive; clears it when idle. */
 export async function refreshStatus($: EngineInterface): Promise<void> {
@@ -56,9 +59,11 @@ export async function refreshStatus($: EngineInterface): Promise<void> {
 /**
  * Plays one of the mod's clips and never throws. On Windows the engine has no
  * player, so PowerShell's SoundPlayer plays the file; elsewhere the engine does.
+ * Sounds muted in the pane play nothing.
  */
 export async function playClip($: EngineInterface, clip: string): Promise<void> {
   try {
+    if (!(await read($, soundOn))) return
     if ((await $.env.get('OS')) === 'Windows_NT') {
       // The path travels in an environment variable, so no quoting can break the command.
       const file = `${$.plugin.root}/${clip}`.replace(/\//g, '\\')
@@ -345,23 +350,50 @@ export async function onNotice($: EngineInterface, text: string, via: string, lo
  * reach the next conversation or compaction, the prompt cache left whole.
  */
 export async function toggleDelegation($: EngineInterface): Promise<void> {
-  await update($, delegation, isOn => !isOn)
-  await quietly(read($, delegation).then(isOn => $.store.set(DELEGATION_KEY, isOn)))
+  const isOn = await update($, delegation, was => !was)
+  await quietly($.store.set(DELEGATION_KEY, isOn))
   $.ui.invalidate('tool.describe')
 }
+
+/** Mutes the pane's sounds or turns them back on; kept in the store for later sessions. */
+export async function toggleSound($: EngineInterface): Promise<void> {
+  const isOn = await update($, soundOn, was => !was)
+  await quietly($.store.set(SOUND_KEY, isOn))
+}
+
+/** Turns the pane's system notifications off or back on; kept in the store for later sessions. */
+export async function toggleNotify($: EngineInterface): Promise<void> {
+  const isOn = await update($, notifyOn, was => !was)
+  await quietly($.store.set(NOTIFY_KEY, isOn))
+}
+
+// The models' changes, one after another: two quick presses each read the store after the other wrote.
+// A module variable: a reload starts an empty queue.
+let modelsQueue: Promise<void> = Promise.resolve()
 
 /**
  * Writes the team's models and keeps them in the store; the next spawn of a
  * team agent runs on them. The Agent tool's team paragraph names them: its
  * cached text is dropped, as the Delegate switch does, for the next conversation.
+ * Calls are queued, so none reads the store before the one ahead of it wrote;
+ * a failed one does not stop the next.
  */
 async function setModels($: EngineInterface, change: (models: TeamModels) => TeamModels): Promise<void> {
+  const run = modelsQueue.then(() => applyModels($, change))
+  modelsQueue = run.catch(() => undefined)
+
+  return run
+}
+
+/** One change of the team's models, applied to what the store holds now. */
+async function applyModels($: EngineInterface, change: (models: TeamModels) => TeamModels): Promise<void> {
   // The store is the one truth, shared by every window: a change applies to what it holds now, so another
   // window's choice made since this one started is kept. Only a store that cannot be read falls back to the atom.
   const stored = await $.store.get(MODELS_KEY).then(modelsFrom, () => undefined)
   const changed = change(stored ?? (await read($, models)))
-  await update($, models, () => changed)
+  // The store first: a tool call or description reading it back meanwhile must not bring the old value back.
   await quietly($.store.set(MODELS_KEY, modelsEntry(changed)))
+  await update($, models, () => changed)
   $.ui.invalidate('tool.describe')
 }
 
@@ -677,9 +709,10 @@ export async function compactNow($: EngineInterface): Promise<void> {
   }
 }
 
-/** A system notification for something long that ended; never throws. */
+/** A system notification for something long that ended, unless the pane's are off; never throws. Toasts are not these. */
 export async function announce($: EngineInterface, text: string): Promise<void> {
   try {
+    if (!(await read($, notifyOn))) return
     await $.ui.notify(text, { title: branding.title })
   } catch {
     // notifications off or no channel: the pane still shows the end
@@ -1165,4 +1198,126 @@ export async function checkForUpdate($: EngineInterface, isEnabled: boolean): Pr
     $.ui.toast(t('update.toast', { version }), { timeoutMs: 10_000 })
     await quietly($.store.set(UPDATE_KEY, { ...record, toasted: version }))
   }
+}
+
+/** How long each `claude plugin` step of an update may take. */
+const UPDATE_STEP_MS = 2 * 60 * 1000
+
+type ClaudeRun = { exitCode: number; stdout: string; stderr: string }
+
+/**
+ * Runs `claude` with its arguments, no shell. On Windows `claude` may be a
+ * `.cmd` shim that cannot be started by name: a start that fails before the
+ * timeout is tried once more through `cmd.exe`. A timeout is not retried.
+ */
+async function runClaude($: EngineInterface, args: readonly string[]): Promise<ClaudeRun> {
+  const startedAt = await $.clock.now()
+  try {
+    return await $.process.run(['claude', ...args], { timeoutMs: UPDATE_STEP_MS })
+  } catch (error) {
+    const isWindows = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT'
+    const isTimeout = (await $.clock.now()) - startedAt >= UPDATE_STEP_MS
+    if (!isWindows || isTimeout) throw error
+
+    return $.process.run(['cmd.exe', '/d', '/s', '/c', 'claude', ...args], { timeoutMs: UPDATE_STEP_MS })
+  }
+}
+
+/** The first line a failed step wrote: its error output's, else its output's, else its exit code. */
+const firstLineOf = (ran: ClaudeRun): string =>
+  [ran.stderr, ran.stdout]
+    .flatMap(text => text.split(/\r?\n/))
+    .map(line => line.trim())
+    .find(line => line !== '') ?? t('update.now.exit', { code: ran.exitCode })
+
+// One update at a time: a second press, or the command while the button's runs, does nothing.
+// A module variable for the guard (two presses can land before the atom is read), the atom for the chip.
+let isUpdatingNow = false
+
+/** Whether an update runs now: what a session start (a reload, a /clear) puts back in the busy mark. */
+export const isUpdateRunning = (): boolean => isUpdatingNow
+// Set once an update was installed and the plugins were not reloaded: the strip asks for /reload-plugins
+// instead of offering the update again. A module variable: the reload that loads the new code starts it over.
+let isAwaitingReload = false
+
+/** Whether an update was installed and waits for /reload-plugins to load it. */
+export const isWaitingForReload = (): boolean => isAwaitingReload
+
+/** What an update did, in words, and whether the plugins are to be reloaded now that it is over. */
+export type UpdateOutcome = { text: string; shouldReload: boolean }
+
+/**
+ * Updates the kit at once: asks GitHub for its latest release, skipping the
+ * day's cache (the answer kept for the daily check); with a newer one, updates
+ * the marketplace and the plugin through `claude plugin`. Answers what
+ * happened and whether to reload: the caller reloads, once this has reset its
+ * guard, since a reload may swap this module out before it could.
+ */
+export async function updateNow($: EngineInterface): Promise<UpdateOutcome> {
+  const said = (text: string): UpdateOutcome => ({ text, shouldReload: false })
+  if (isUpdatingNow) return said(t('update.now.running'))
+  // Installed already and waiting for the reload that loads it: running the steps again would change nothing.
+  if (isAwaitingReload) return said(t('update.now.reload'))
+  isUpdatingNow = true
+  await quietly(update($, updating, () => true))
+  try {
+    const own = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).then(manifestVersion, () => undefined)
+    const latest = await latestRelease($)
+    if (latest === undefined) return said(t('update.now.noAnswer'))
+    const at = await $.clock.now()
+    const record = await $.store.get(UPDATE_KEY).then(recordFrom, () => ({ at: 0 }) as UpdateRecord)
+    await quietly($.store.set(UPDATE_KEY, { ...record, at, ...latest }))
+    if (own !== undefined && !isNewer(latest.version, own)) {
+      await quietly(update($, updateNotice, () => null))
+
+      return said(t('update.now.current', { version: own }))
+    }
+    const steps: readonly (readonly string[])[] = [
+      ['plugin', 'marketplace', 'update', 'agent-team-kit'],
+      ['plugin', 'update', 'agent-team@agent-team-kit'],
+    ]
+    for (const step of steps) {
+      const name = `claude ${step.join(' ')}`
+      try {
+        const ran = await runClaude($, step)
+        if (ran.exitCode !== 0) return said(t('update.now.failed', { step: name, reason: firstLineOf(ran) }))
+      } catch (error) {
+        return said(t('update.now.failed', { step: name, reason: error instanceof Error ? error.message : String(error) }))
+      }
+    }
+    await quietly(update($, updateNotice, () => null))
+    const listed = await $.command.list().catch(() => [])
+    if (listed.some(c => c.name === 'reload-plugins')) return { text: t('update.now.reloading'), shouldReload: true }
+    isAwaitingReload = true
+
+    return said(t('update.now.reload'))
+  } finally {
+    isUpdatingNow = false
+    await quietly(update($, updating, () => false))
+  }
+}
+
+/**
+ * Reloads the plugins after an update, in a dispatch of its own: run from
+ * inside a command's hook the engine may refuse it, or the hook wait on it.
+ * Refused, the person is told to run /reload-plugins, and the update chip
+ * keeps saying so (with no button) until a reload loads the new code.
+ */
+export function reloadPlugins($: EngineInterface): void {
+  $.clock.after(0, () => {
+    void $.command.run({ command: 'reload-plugins' }).catch(() => {
+      isAwaitingReload = true
+      // The flag is no atom: the strip is redrawn so it shows the /reload-plugins hint in place of the button now.
+      $.ui.invalidate('ui.render')
+      $.ui.toast(t('update.now.reload'), { timeoutMs: 10_000 })
+    })
+  })
+}
+
+/** The pane's "Update now": the outcome in a toast, then the reload; a press while one runs does nothing. */
+export async function pressUpdateNow($: EngineInterface): Promise<void> {
+  if (isUpdatingNow) return
+  const done = await updateNow($)
+  $.ui.toast(done.text, { timeoutMs: 10_000 })
+  if (done.shouldReload) reloadPlugins($)
 }

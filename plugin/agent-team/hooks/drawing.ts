@@ -3,8 +3,8 @@
 import type { AgentRow, AgentStatus, Role, Team, Usage } from '../types'
 import { t } from './i18n'
 import { levelOf, percentText, projectionOf, resetClock, roundTokens, windowName } from './usage'
-import { ASLEEP, BRAND, branding, CARD, CONTEXT_COLOR, esc, INK, LEVEL_COLOR, LOOK, neonTint, neonWord, nameOf, pixelWord, starfield, statusText, WARN, wordWidth } from './look'
-import { AFTERGLOW_MS, familyOf, isAlive, isOverReading, isShellRunning, isStill, MAIN_END_MS, PULSE_MS } from './state'
+import { ASK, ASLEEP, BRAND, branding, CARD, CONTEXT_COLOR, EASE, EASE_OUT, esc, INK, LEVEL_COLOR, LOOK, neonTint, neonWord, nameOf, pixelWord, SOFT, spline, starfield, statusText, WARN, wordWidth } from './look'
+import { AFTERGLOW_MS, familyOf, isAlive, isAsking, isOverReading, isShellRunning, isStill, MAIN_END_MS, PULSE_MS } from './state'
 
 // ---------------------------------------------------------------- sprites
 
@@ -19,7 +19,8 @@ export const eyes = (x: number, y: number, s: number, isAsleep: boolean, dur: st
   }
   const top = y + 3 * s
   const shut = y + 3.8 * s
-  const times = isDouble ? 'keyTimes="0;0.82;0.855;0.89;0.925;0.96;1"' : 'keyTimes="0;0.9;0.95;1"'
+  const at = isDouble ? [0, 0.82, 0.855, 0.89, 0.925, 0.96, 1] : [0, 0.9, 0.95, 1]
+  const times = spline(at.length, EASE, at)
   const open = 2 * s
   const closed = 0.4 * s
   const heights = isDouble ? [open, open, closed, open, closed, open, open] : [open, open, closed, open]
@@ -40,8 +41,8 @@ export const snore = (x: number, y: number, s: number, isStill = false): string 
   isStill
     ? `<text x="${x + 9 * s + 1.5 * s}" y="${y + 2 * s - 3 * s}" font-size="11" font-weight="bold" fill="#8f8bb0" opacity="0.5">z</text>`
     : `<text x="${x + 9 * s}" y="${y + 2 * s}" font-size="11" font-weight="bold" fill="#8f8bb0" opacity="0">z` +
-      `<animate attributeName="opacity" values="0;0.85;0" dur="3.6s" repeatCount="indefinite"/>` +
-      `<animateTransform attributeName="transform" type="translate" values="0 0;${1.5 * s} ${-3 * s}" dur="3.6s" repeatCount="indefinite"/></text>`
+      `<animate attributeName="opacity" values="0;0.85;0" ${spline(3, SOFT)} dur="3.6s" repeatCount="indefinite"/>` +
+      `<animateTransform attributeName="transform" type="translate" values="0 0;${1.5 * s} ${-3 * s}" ${spline(2)} dur="3.6s" repeatCount="indefinite"/></text>`
 
 /** Each role's prop and its own animation. */
 export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): string => {
@@ -54,11 +55,11 @@ export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): s
       // antenna with a blinking tip; rings ripple off it while Claude works
       const tip =
         `<rect x="${x + 4.5 * s}" y="${y - 2 * s}" width="${s}" height="${s}" fill="#ffd166">` +
-        `<animate attributeName="opacity" values="1;0.25;1" dur="${isBusy ? '0.5s' : '1.6s'}" repeatCount="indefinite"/></rect>`
+        `<animate attributeName="opacity" values="1;0.25;1" ${spline(3, SOFT)} dur="${isBusy ? '0.5s' : '1.6s'}" repeatCount="indefinite"/></rect>`
       const ring = isBusy
         ? `<circle cx="${x + 5 * s}" cy="${y - 1.5 * s}" r="${s}" fill="none" stroke="#ffd166" stroke-width="1.5">` +
-          `<animate attributeName="r" values="${0.5 * s};${2.6 * s}" dur="1s" repeatCount="indefinite"/>` +
-          `<animate attributeName="opacity" values="0.9;0" dur="1s" repeatCount="indefinite"/></circle>`
+          `<animate attributeName="r" values="${0.5 * s};${2.6 * s}" ${spline(2, EASE_OUT)} dur="1s" repeatCount="indefinite"/>` +
+          `<animate attributeName="opacity" values="0.9;0" ${spline(2, SOFT)} dur="1s" repeatCount="indefinite"/></circle>`
         : ''
 
       return px(5, -1, 1, 2, '#f3a56b') + tip + ring
@@ -73,8 +74,8 @@ export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): s
       return (
         torch +
         `<g><polygon points="${tx},${ty} ${tx + 5 * s},${ty - 2 * s} ${tx + 5 * s},${ty + 2 * s}" fill="#ffd166" opacity="0.3">` +
-        `<animate attributeName="opacity" values="0.38;0.12;0.38" dur="1.2s" repeatCount="indefinite"/></polygon>` +
-        `<animateTransform attributeName="transform" type="rotate" values="-16 ${tx} ${ty};16 ${tx} ${ty};-16 ${tx} ${ty}" dur="${isBusy ? '1.8s' : '3s'}" repeatCount="indefinite"/></g>`
+        `<animate attributeName="opacity" values="0.38;0.12;0.38" ${spline(3, SOFT)} dur="1.2s" repeatCount="indefinite"/></polygon>` +
+        `<animateTransform attributeName="transform" type="rotate" values="-16 ${tx} ${ty};16 ${tx} ${ty};-16 ${tx} ${ty}" ${spline(3)} dur="${isBusy ? '1.8s' : '3s'}" repeatCount="indefinite"/></g>`
       )
     }
     case 'implementer': {
@@ -88,7 +89,7 @@ export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): s
       if (!isAwake) return hat + hammer
       const dur = isBusy ? 0.6 : 1.4
       const swing =
-        `<g>${hammer}<animateTransform attributeName="transform" type="rotate" values="-30 ${hx} ${hy};65 ${hx} ${hy};-30 ${hx} ${hy}" keyTimes="0;0.3;1" dur="${dur}s" repeatCount="indefinite"/></g>`
+        `<g>${hammer}<animateTransform attributeName="transform" type="rotate" values="-30 ${hx} ${hy};65 ${hx} ${hy};-30 ${hx} ${hy}" ${spline(3, EASE, [0, 0.3, 1])} dur="${dur}s" repeatCount="indefinite"/></g>`
       const sparks = [
         { col: 12.2, row: 4.2 },
         { col: 12.9, row: 5.4 },
@@ -96,8 +97,9 @@ export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): s
       ]
         .map(
           ({ col, row }) =>
+            // the sparks stay a hard flash, as a strike is; their keyTimes end at 1, as SMIL asks
             `<rect x="${x + col * s}" y="${y + row * s}" width="${0.5 * s}" height="${0.5 * s}" fill="#ffd166" opacity="0">` +
-            `<animate attributeName="opacity" values="0;0;1;0" keyTimes="0;0.28;0.34;0.6" dur="${dur}s" repeatCount="indefinite"/></rect>`,
+            `<animate attributeName="opacity" values="0;0;1;0;0" keyTimes="0;0.28;0.34;0.6;1" dur="${dur}s" repeatCount="indefinite"/></rect>`,
         )
         .join('')
 
@@ -110,14 +112,14 @@ export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): s
       const glasses = frame(3) + frame(6) + px(4.5, 3.5, 1, 0.25, isAwake ? '#f1f1f1' : '#8a879c')
       const glint = isAwake
         ? `<rect x="${x + 2.7 * s}" y="${y + 2.7 * s}" width="${0.5 * s}" height="${0.5 * s}" fill="#ffffff" opacity="0">` +
-          `<animate attributeName="opacity" values="0;0;1;0" keyTimes="0;0.8;0.86;1" dur="2.6s" repeatCount="indefinite"/></rect>`
+          `<animate attributeName="opacity" values="0;0;1;0" ${spline(4, SOFT, [0, 0.8, 0.86, 1])} dur="2.6s" repeatCount="indefinite"/></rect>`
         : ''
       const page =
         `<rect x="${x + 9.6 * s}" y="${y + 3 * s}" width="${2.4 * s}" height="${3.4 * s}" rx="1" fill="${isAwake ? '#e9e6f5' : '#5d5a6b'}"/>` +
         [3.6, 4.4, 5.2, 6.0].map(r => px(9.9, r, 1.8, 0.22, isAwake ? '#9a96b5' : '#4a4858')).join('')
       const scan = isAwake
         ? `<rect x="${x + 9.6 * s}" y="${y + 3.3 * s}" width="${2.4 * s}" height="${0.5 * s}" fill="${LOOK.reviewer.color}" opacity="0.55">` +
-          `<animate attributeName="y" values="${y + 3.3 * s};${y + 5.8 * s};${y + 3.3 * s}" dur="${isBusy ? '1s' : '2.2s'}" repeatCount="indefinite"/></rect>`
+          `<animate attributeName="y" values="${y + 3.3 * s};${y + 5.8 * s};${y + 3.3 * s}" ${spline(3)} dur="${isBusy ? '1s' : '2.2s'}" repeatCount="indefinite"/></rect>`
         : ''
 
       return page + scan + glasses + glint
@@ -134,8 +136,8 @@ export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): s
         .map(
           i =>
             `<circle cx="${x + (9.9 + (i % 2) * 0.5) * s}" cy="${y + 6 * s}" r="${0.25 * s}" fill="#c8ffd6" opacity="0">` +
-            `<animate attributeName="cy" values="${y + 6 * s};${y + 1.2 * s}" dur="${dur}s" begin="${(i * dur) / 3}s" repeatCount="indefinite"/>` +
-            `<animate attributeName="opacity" values="0;0.9;0" dur="${dur}s" begin="${(i * dur) / 3}s" repeatCount="indefinite"/></circle>`,
+            `<animate attributeName="cy" values="${y + 6 * s};${y + 1.2 * s}" ${spline(2)} dur="${dur}s" begin="${(i * dur) / 3}s" repeatCount="indefinite"/>` +
+            `<animate attributeName="opacity" values="0;0.9;0" ${spline(3, SOFT)} dur="${dur}s" begin="${(i * dur) / 3}s" repeatCount="indefinite"/></circle>`,
         )
         .join('')
 
@@ -143,7 +145,7 @@ export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): s
     }
     case 'other':
       return isAwake
-        ? `<rect x="${x + 5 * s}" y="${y}" width="${s}" height="${s}" fill="#d8d8d8"><animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite"/></rect>`
+        ? `<rect x="${x + 5 * s}" y="${y}" width="${s}" height="${s}" fill="#d8d8d8"><animate attributeName="opacity" values="1;0.3;1" ${spline(3, SOFT)} dur="1.2s" repeatCount="indefinite"/></rect>`
         : px(5, 0, 1, 1, '#6b6878')
   }
 }
@@ -169,7 +171,7 @@ export const sprite = (x: number, y: number, role: Role, mood: Mood, s: number, 
   // the explorer's eyes glance side to side, looking for things
   const face =
     role === 'explorer' && !isAsleep
-      ? `<g>${look}<animateTransform attributeName="transform" type="translate" values="0 0;${0.6 * s} 0;0 0;${-0.6 * s} 0;0 0" dur="3.2s" repeatCount="indefinite"/></g>`
+      ? `<g>${look}<animateTransform attributeName="transform" type="translate" values="0 0;${0.6 * s} 0;0 0;${-0.6 * s} 0;0 0" ${spline(5)} dur="3.2s" repeatCount="indefinite"/></g>`
       : look
   const inner = body + face + gear(x, y, s, role, mood)
   if (isStill) return `<g>${frozen(inner)}</g>` + (isAsleep ? snore(x, y, s, true) : '')
@@ -181,12 +183,12 @@ export const sprite = (x: number, y: number, role: Role, mood: Mood, s: number, 
 
     return (
       `<g transform="translate(${cx} ${fy})"><g>` +
-      `<animateTransform attributeName="transform" type="scale" values="1 1;1.02 1.045;1 1" keyTimes="0;0.5;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" dur="4.4s" repeatCount="indefinite"/>` +
+      `<animateTransform attributeName="transform" type="scale" values="1 1;1.02 1.045;1 1" ${spline(3)} dur="4.4s" repeatCount="indefinite"/>` +
       `<g transform="translate(${-cx} ${-fy})">${inner}</g></g></g>`
     )
   }
 
-  return `<g>${inner}<animateTransform attributeName="transform" type="translate" values="0 0;0 ${-s / 2};0 0" dur="${mood === 'busy' ? '0.6s' : '2.4s'}" repeatCount="indefinite"/></g>`
+  return `<g>${inner}<animateTransform attributeName="transform" type="translate" values="0 0;0 ${-s / 2};0 0" ${spline(3)} dur="${mood === 'busy' ? '0.6s' : '2.4s'}" repeatCount="indefinite"/></g>`
 }
 
 /** Which little picture a tool gets above Claude's head. */
@@ -258,7 +260,7 @@ export const thoughtBubble = (leadX: number, leadTop: number): string => {
     .map(
       i =>
         `<circle cx="${bx + 9 + i * 8}" cy="${by + BADGE.h / 2}" r="2.6" fill="#ffd166" opacity="0.25">` +
-        `<animate attributeName="opacity" values="0.25;1;0.25" keyTimes="0;0.33;0.66" dur="1.5s" begin="${i * 0.5}s" repeatCount="indefinite"/></circle>`,
+        `<animate attributeName="opacity" values="0.25;1;0.25;0.25" ${spline(4, SOFT, [0, 0.33, 0.66, 1])} dur="1.5s" begin="${i * 0.5}s" repeatCount="indefinite"/></circle>`,
     )
     .join('')
 
@@ -273,7 +275,7 @@ export const thoughtBubble = (leadX: number, leadTop: number): string => {
 export const check = (x: number, y: number, isFresh: boolean): string =>
   `<path d="M${x - 8},${y} l5,5 l11,-12" fill="none" stroke="#4caf50" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"` +
   (isFresh
-    ? ` stroke-dasharray="30" stroke-dashoffset="30"><animate attributeName="stroke-dashoffset" from="30" to="0" dur="0.45s" fill="freeze"/></path>`
+    ? ` stroke-dasharray="30" stroke-dashoffset="30"><animate attributeName="stroke-dashoffset" values="30;0" ${spline(2, EASE_OUT)} dur="0.45s" fill="freeze"/></path>`
     : '/>')
 
 /** Confetti in the brand colours: a job well done. A one-shot, so drawn only while fresh. */
@@ -285,12 +287,21 @@ export const confetti = (cx: number, cy: number): string =>
 
     return (
       `<rect x="${cx - 2}" y="${cy - 2}" width="4" height="4" fill="${BRAND[i % BRAND.length]}">` +
-      `<animateTransform attributeName="transform" type="translate" values="0 0;${dx} ${dy}" dur="0.9s" fill="freeze"/>` +
-      `<animate attributeName="opacity" values="1;1;0" keyTimes="0;0.6;1" dur="0.9s" fill="freeze"/></rect>`
+      `<animateTransform attributeName="transform" type="translate" values="0 0;${dx} ${dy}" ${spline(2, EASE_OUT)} dur="0.9s" fill="freeze"/>` +
+      `<animate attributeName="opacity" values="1;1;0" ${spline(3, SOFT, [0, 0.6, 1])} dur="0.9s" fill="freeze"/></rect>`
     )
   }).join('')
 
-/** A wire from the lead's socket down to a slot, with a pulse when asked. */
+/**
+ * A shake for something that went wrong: a sideways wobble that dies down,
+ * under a sprite pixel each way and eased between its keyframes, so it glides
+ * instead of jumping a whole pixel at a time. A one-shot, as before.
+ */
+export const SHAKE =
+  `<animateTransform attributeName="transform" type="translate" values="0 0;-2.4 0;2.4 0;-1.8 0;1.8 0;-1 0;1 0;0 0" ` +
+  `${spline(8)} dur="0.9s" repeatCount="1"/>`
+
+/** A wire from the lead's socket down to a slot, with a pulse when asked. The marching dashes stay linear: an endless flow, not a move. */
 export const wire = (
   x0: number,
   y0: number,
@@ -299,6 +310,7 @@ export const wire = (
   color: string,
   isLive: boolean,
   pulse: 'out' | 'back' | undefined,
+  pulseColor = color,
 ): string => {
   const ym = y0 + (y1 - y0) / 2
   const d = `M${x0},${y0} L${x0},${ym} L${x1},${ym} L${x1},${y1}`
@@ -310,8 +322,8 @@ export const wire = (
   const dot =
     pulse === undefined
       ? ''
-      : `<circle r="6" fill="${color}"><animateMotion dur="1.1s" repeatCount="indefinite" path="${d}" keyPoints="${pulse === 'out' ? '0;1' : '1;0'}" keyTimes="0;1" calcMode="linear"/></circle>` +
-        `<circle r="11" fill="${color}" opacity="0.25"><animateMotion dur="1.1s" repeatCount="indefinite" path="${d}" keyPoints="${pulse === 'out' ? '0;1' : '1;0'}" keyTimes="0;1" calcMode="linear"/></circle>`
+      : `<circle r="6" fill="${pulseColor}"><animateMotion dur="1.1s" repeatCount="indefinite" path="${d}" keyPoints="${pulse === 'out' ? '0;1' : '1;0'}" ${spline(2)}/></circle>` +
+        `<circle r="11" fill="${pulseColor}" opacity="0.25"><animateMotion dur="1.1s" repeatCount="indefinite" path="${d}" keyPoints="${pulse === 'out' ? '0;1' : '1;0'}" ${spline(2)}/></circle>`
 
   return path + dot
 }
@@ -346,6 +358,13 @@ export const pulseOf = (a: AgentRow | undefined, at: number): 'out' | 'back' | u
 
   return undefined
 }
+
+/**
+ * The colour of a wire's pulse: purple when it carries questions, back from an
+ * agent that ended asking or out to one woken to have them answered.
+ */
+export const pulseColorOf = (a: AgentRow | undefined, pulse: 'out' | 'back' | undefined, color: string): string =>
+  a !== undefined && ((pulse === 'back' && isAsking(a)) || (pulse === 'out' && a.answering === true)) ? ASK : color
 
 // ------------------------------------------------------------ the usage column
 
@@ -453,19 +472,19 @@ export const ledBar = (x: number, y: number, w: number, percent: number, color: 
     const glow = (0.55 + 0.45 * ((k + 1) / lit)).toFixed(2)
     const beat =
       isLive && k === lit - 1
-        ? `<animate attributeName="opacity" values="1;0.35;1" dur="1.2s" repeatCount="indefinite"/>`
+        ? `<animate attributeName="opacity" values="1;0.35;1" ${spline(3, SOFT)} dur="1.2s" repeatCount="indefinite"/>`
         : ''
     out.push(
       `<rect x="${sx}" y="${y}" width="${segW.toFixed(1)}" height="${h}" rx="1.5" fill="${color}" opacity="${glow}">${beat}</rect>`,
     )
   }
   let bar = out.join('')
-  if (isHot) bar = `<g>${bar}<animate attributeName="opacity" values="1;0.45;1" dur="0.9s" repeatCount="indefinite"/></g>`
+  if (isHot) bar = `<g>${bar}<animate attributeName="opacity" values="1;0.45;1" ${spline(3, SOFT)} dur="0.9s" repeatCount="indefinite"/></g>`
   const litW = lit * (segW + gap) - gap
   const glint =
     isLive && lit > 0
       ? `<rect x="${x}" y="${y}" width="6" height="${h}" fill="#ffffff" opacity="0.35">` +
-        `<animate attributeName="x" values="${x};${(x + litW - 6).toFixed(1)}" dur="1.8s" repeatCount="indefinite"/></rect>`
+        `<animate attributeName="x" values="${x};${(x + litW - 6).toFixed(1)}" ${spline(2)} dur="1.8s" repeatCount="indefinite"/></rect>`
       : ''
 
   return bar + glint
@@ -549,7 +568,7 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     `<linearGradient id="dx-ink" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${W}" y2="0" spreadMethod="reflect">` +
       BRAND.map((c, i) => `<stop offset="${(i / (BRAND.length - 1)).toFixed(2)}" stop-color="${c}"/>`).join('') +
       (isLive
-        ? `<animateTransform attributeName="gradientTransform" type="translate" values="0 0;${W / 2} 0;0 0" dur="7s" repeatCount="indefinite"/>`
+        ? `<animateTransform attributeName="gradientTransform" type="translate" values="0 0;${W / 2} 0;0 0" ${spline(3)} dur="7s" repeatCount="indefinite"/>`
         : '') +
       '</linearGradient>',
     '<filter id="dx-glow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
@@ -593,7 +612,7 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
   let claude = sprite(leadX - 5 * s, leadTop + 14, 'main', isWorking ? 'busy' : 'awake', s, isResting)
   if (hasFailed && sinceEnd < MAIN_END_MS) {
     // a shake: the turn ended in an API error
-    claude = `<g>${claude}<animateTransform attributeName="transform" type="translate" values="-3 0;3 0;-3 0;3 0;0 0" dur="0.5s" repeatCount="2"/></g>`
+    claude = `<g>${claude}${SHAKE}</g>`
   }
   out.push(
     `<rect x="${leadX - leadW / 2}" y="${leadTop}" width="${leadW}" height="${leadH}" rx="12" fill="${isWorking ? '#241a22' : '#1a1622'}" stroke="${isWorking || anyRunning ? LOOK.main.color : '#5a3a2a'}" stroke-width="2"/>`,
@@ -612,7 +631,7 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     const by = leadTop + 4
     out.push(
       `<g><title>${esc(overReadTitle(squad.main.reads.length))}</title>` +
-        `<circle cx="${bx}" cy="${by}" r="9" fill="${WARN}"><animate attributeName="r" values="8;10;8" dur="1.2s" repeatCount="indefinite"/></circle>` +
+        `<circle cx="${bx}" cy="${by}" r="9" fill="${WARN}"><animate attributeName="r" values="8;10;8" ${spline(3)} dur="1.2s" repeatCount="indefinite"/></circle>` +
         `<text x="${bx}" y="${by + 4.5}" text-anchor="middle" font-size="13" font-weight="bold" fill="${INK}">!</text></g>`,
     )
   }
@@ -626,29 +645,37 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     const isRunning = a?.status === 'running'
     const isGlowing = a?.endedAt !== undefined && at - a.endedAt < AFTERGLOW_MS
     const color = LOOK[slot.role].color
-    out.push(wire(leadX, leadTop + leadH, cx, slotTop, color, isRunning, pulseOf(a, at)))
+    const pulse = pulseOf(a, at)
+    out.push(wire(leadX, leadTop + leadH, cx, slotTop, color, isRunning, pulse, pulseColorOf(a, pulse, color)))
 
     // Past its afterglow an ended agent sleeps: a done or stopped slot rests like an empty one, a failed one
     // keeps a dimmed red until the role runs again. The ticker redraws once as the afterglow ends (isAlive).
+    // One that stopped to ask stays purple, a "?" over it, until it is woken to have its questions answered.
     const isSettled = a !== undefined && !isRunning && !isGlowing
+    const asks = a !== undefined && isAsking(a)
     const border =
       a === undefined
         ? '#2e2a3a'
-        : a.status === 'running'
-          ? color
-          : a.status === 'failed'
-            ? isSettled
-              ? FAILED_RESTING
-              : '#d9534f'
-            : isSettled
-              ? '#2e2a3a'
-              : a.status === 'stopped'
-                ? '#5d5a6b'
-                : '#3d6b3d'
+        : asks
+          ? ASK
+          : a.status === 'running'
+            ? color
+            : a.status === 'failed'
+              ? isSettled
+                ? FAILED_RESTING
+                : '#d9534f'
+              : isSettled
+                ? '#2e2a3a'
+                : a.status === 'stopped'
+                  ? '#5d5a6b'
+                  : '#3d6b3d'
     const barStatus = isSettled && a?.status !== 'failed' ? undefined : a?.status
-    const mood: Mood = isRunning ? 'busy' : isGlowing && a?.status !== 'stopped' ? 'awake' : 'asleep'
+    const mood: Mood = isRunning ? 'busy' : asks || (isGlowing && a?.status !== 'stopped') ? 'awake' : 'asleep'
     const left = cx - boxW / 2
-    const tip = a === undefined ? t('slot.idle', { name: nameOf(slot.role) }) : `${nameOf(slot.role)}: ${a.description} (${statusText(a.status)})`
+    const tip =
+      a === undefined
+        ? t('slot.idle', { name: nameOf(slot.role) })
+        : `${nameOf(slot.role)}: ${a.description} (${asks ? t('ask.count', { n: a.questions?.length ?? 0 }) : statusText(a.status)})`
     // One-shot effects (confetti, the shake, the check drawn on) live only in
     // the pulse window: a redraw later in the afterglow would replay them.
     const isFresh = a?.endedAt !== undefined && at - a.endedAt < PULSE_MS
@@ -656,11 +683,13 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     if (isGlowing && a?.status === 'failed') {
       // a shake and a red mark: something went wrong
       if (isFresh) {
-        body = `<g>${body}<animateTransform attributeName="transform" type="translate" values="-3 0;3 0;-3 0;3 0;0 0" dur="0.5s" repeatCount="2"/></g>`
+        body = `<g>${body}${SHAKE}</g>`
       }
       body += `<text x="${left + boxW - 14}" y="${slotTop + 24}" text-anchor="middle" font-size="18" font-weight="bold" fill="#ff5c5c">!</text>`
     }
-    if (isGlowing && a?.status === 'done') {
+    if (asks) {
+      body += `<text x="${left + boxW - 14}" y="${slotTop + 24}" text-anchor="middle" font-size="18" font-weight="bold" fill="${ASK}">?</text>`
+    } else if (isGlowing && a?.status === 'done') {
       body += (isFresh ? confetti(cx, slotTop + 44) : '') + check(left + boxW - 18, slotTop + 18, isFresh)
     }
     out.push(

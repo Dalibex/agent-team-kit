@@ -13,6 +13,10 @@ export const PANE = 'agent-team'
 export const COMMAND = 'agent-team'
 /** Kept in `$.store` across sessions: false once the pane was hidden with the command. */
 export const OPEN_KEY = 'isOpen'
+/** Kept in `$.store` across sessions: false once the person muted the pane's sounds. */
+export const SOUND_KEY = 'soundOn'
+/** Kept in `$.store` across sessions: false once the person turned the pane's system notifications off. */
+export const NOTIFY_KEY = 'notifyOn'
 /** Kept in `$.store` across sessions: the usage warnings already shown, per window and reset. */
 export const WARNED_KEY = 'warned'
 /** Kept in `$.store` across sessions: the five-hour window's readings, so its trend survives a new session. */
@@ -115,6 +119,97 @@ export const roleOf = (type: string): Role => {
   return 'other'
 }
 
+/**
+ * The header a report opens with when its agent stopped to ask: `QUESTIONS:`
+ * or `PREGUNTAS:`, after any blank space, as a Markdown heading or in bold
+ * (`## QUESTIONS:`, `**QUESTIONS:**`, `**QUESTIONS**:`).
+ */
+const ASK_HEAD = /^\s*(?:#{1,6}[ \t]*)?(?:[*_]{1,2})?(?:QUESTIONS|PREGUNTAS)(?:[*_]{1,2})?:(?:[*_]{1,2})?/
+/** A numbered or bulleted line: `1. `, `2) `, `- `, `* `, `• `, `+ `. */
+const ASK_ITEM = /^(?:\d+[.)]|[-*•+])\s+(.*)$/
+/** Questions kept per row, and the characters kept of each. */
+export const QUESTIONS_MAX = 10
+export const QUESTION_CHARS = 300
+
+/**
+ * A line of a report without its Markdown emphasis: a `**bold**` or
+ * `__bold__` pair around some text loses its markers, a lone `**` (as in
+ * `**kwargs`) stays, and text inside backticks is left as written.
+ */
+export const plainLine = (text: string): string =>
+  text
+    .split(/(`[^`]*`)/)
+    .map(part =>
+      part.startsWith('`') && part.endsWith('`') && part.length > 1
+        ? part
+        : part.replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1').replace(/(?<![\p{L}\p{N}_])__(?=\S)(.+?)(?<=\S)__(?![\p{L}\p{N}_])/gu, '$1'),
+    )
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/**
+ * The questions of a report that opens with the asking header, one per
+ * question. The margin is the least indent of its lines: a line there starts
+ * a question, numbered, bulleted or plain, and the deeper lines under it
+ * (sub-items, details) join that question. Once a list of items has started
+ * at the margin, a plain line at the margin (what was checked, a closing
+ * remark) ends the question it follows and is not one itself, nor is what is
+ * indented under it; a plain line there before the first item is an
+ * introduction and is dropped too. Undefined when the report does not ask, or
+ * asks nothing. A later Markdown heading ends the list.
+ */
+export const questionsOf = (answer: string | undefined): string[] | undefined => {
+  if (answer === undefined) return undefined
+  const head = ASK_HEAD.exec(answer)
+  if (head === null) return undefined
+  const body = answer.slice(head[0].length).split(/\r?\n/)
+  const end = body.findIndex((line, i) => i > 0 && /^\s*#{1,6}\s/.test(line))
+  // The rest of the header's own line starts at the margin, whatever space follows the colon.
+  const lines = (end === -1 ? body : body.slice(0, end))
+    .map((line, i) => ({ indent: i === 0 ? 0 : line.length - line.trimStart().length, text: plainLine(line) }))
+    .filter(line => line.text !== '')
+    .map(line => ({ ...line, item: ASK_ITEM.exec(line.text)?.[1] }))
+  if (lines.length === 0) return undefined
+  const margin = Math.min(...lines.map(line => line.indent))
+  const hasItems = lines.some(line => line.indent === margin && line.item !== undefined)
+  const out: string[] = []
+  let isOpen = false
+  for (const line of lines) {
+    if (line.indent === margin && (line.item !== undefined || !hasItems)) {
+      out.push(line.item ?? line.text)
+      isOpen = true
+    } else if (line.indent === margin) {
+      // Prose at the margin of a list: an introduction or a remark, not a question.
+      isOpen = false
+    } else if (isOpen) {
+      out[out.length - 1] = `${out[out.length - 1] ?? ''} ${line.item ?? line.text}`.trim()
+    }
+  }
+  const kept = out.filter(one => one !== '').slice(0, QUESTIONS_MAX).map(one => one.slice(0, QUESTION_CHARS))
+
+  return kept.length === 0 ? undefined : kept
+}
+
+/** An agent that ended asking questions and was not woken since to have them answered. */
+export const isAsking = (a: AgentRow): boolean => a.status !== 'running' && a.questions !== undefined
+
+/**
+ * The rows once a new agent of `row`'s role (any other agent: of its type)
+ * starts afresh: Claude sent a new one instead of continuing, so the older
+ * ones of that role no longer wait for answers.
+ */
+export const withoutOldQuestions = (agents: AgentRow[], row: AgentRow): AgentRow[] =>
+  agents.map(a =>
+    a.id !== row.id && a.questions !== undefined && a.role === row.role && (row.role !== 'other' || a.type === row.type)
+      ? { ...a, questions: undefined }
+      : a,
+  )
+
+/** Every row with its questions dropped: after a `/clear` nobody waits for answers in the new conversation. */
+export const withoutQuestions = (agents: AgentRow[]): AgentRow[] =>
+  agents.map(a => (a.questions === undefined ? a : { ...a, questions: undefined }))
+
 /** How a turn's reason reads as a row's end: an interrupt is a stop, not a failure. */
 export const statusOfTurn = (reason: 'answer' | 'aborted' | 'refusal' | 'error'): AgentStatus =>
   reason === 'answer' ? 'done' : reason === 'aborted' ? 'stopped' : 'failed'
@@ -202,7 +297,8 @@ export const withRows = (agents: AgentRow[], rows: AgentRow[]): AgentRow[] => {
   let excess = all.length - HISTORY
 
   return all.filter(a => {
-    if (excess <= 0 || a.status === 'running') return true
+    // Running rows stay, and so do asking ones: their questions wait for an answer.
+    if (excess <= 0 || a.status === 'running' || isAsking(a)) return true
     excess -= 1
 
     return false
@@ -221,7 +317,8 @@ export const closeRow = (
 ): Team => {
   const row = t.agents.find(a => a.id === id && a.status === 'running')
   if (row === undefined) return t
-  const closed: AgentRow = { ...row, ...end }
+  // Whatever ended it, the round that answered questions is over.
+  const closed: AgentRow = { ...row, answering: undefined, ...end }
 
   return {
     ...t,
@@ -1171,7 +1268,7 @@ export const runsEntry = (squad: Team, where: { folder: string; branch?: string 
     const sum = plusTokens(a.spent, a.tokens)
     const used = sum === undefined ? undefined : t('runs.tokens', { input: kilo(sum.input), output: kilo(sum.output) })
     const details = [
-      t('runs.status', { status: statusText(a.status) }),
+      t('runs.status', { status: isAsking(a) ? t('status.asking') : statusText(a.status) }),
       t('runs.time', { time: seconds(workedOf(a, at)) }),
       t('runs.rounds', { n: a.rounds ?? 0 }),
       used,

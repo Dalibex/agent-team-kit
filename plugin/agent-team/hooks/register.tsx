@@ -2,12 +2,12 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { AgentRow, MainLoop } from '../types'
 import { ciPollMs } from './github'
-import { adopt, afterShell, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, onTaskStop, quietly, readTails, reconcile, refreshGit, refreshStatus, runTracked, scheduleGit, takeUsage, writeRuns } from './actions'
+import { adopt, afterShell, announce, announceShell, changeRules, checkForUpdate, checkReviewSize, chime, closeShell, ensureChoices, followProject, loadChoices, loadProject, onNotice, onTaskStop, quietly, isUpdateRunning, readTails, reconcile, refreshGit, reloadPlugins, refreshStatus, runTracked, scheduleGit, takeUsage, updateNow, writeRuns } from './actions'
 import { beginLanguage, settleLanguage, t } from './i18n'
 import { branding, brandingOf, nameOf, seconds, setBranding } from './look'
 import { UPDATE_MS } from './update'
 import { renderPane } from './pane'
-import { addRun, apiErrorText, chosenFor, COMMAND, contextFor, DEFAULT_MODELS, DELEGATION_KEY, MODELS_KEY, modelsFrom, detailOf, editPathOf, isMissedRound, isTeamBrief, TEAM_TYPES, withRead, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, isStill, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, plusTokens, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withRows, withShell } from './state'
+import { addRun, apiErrorText, chosenFor, COMMAND, contextFor, DEFAULT_MODELS, DELEGATION_KEY, MODELS_KEY, modelsFrom, detailOf, editPathOf, isMissedRound, isTeamBrief, TEAM_TYPES, withRead, spawnWarning, teamContext, whereOf, withTeamDelegation, EMPTY, endRow, FIRST_TAB, GIT_LOCAL_MS, GIT_SHAPE, IDLE_MAIN, isAlive, isStill, LOG_LINES, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_SLOTS, OPEN_KEY, PACKS_KEY, packsFrom, PANE, PERSON_ORIGINS, namesPicked, pickedSkills, readPathOf, RECONCILE_MS, roleOf, runsEntry, teamRows, markOf, NO_LOGGED, NOTIFY_KEY, plusTokens, questionsOf, SOUND_KEY, workedOf, shellOf, shellSound, SLOTS_KEY, withSkill, slotsFrom, soundFor, statusOfTurn, stopLeftovers, TAB_KEY, tabFrom, TAIL_MS, TEAM_SHAPE, tokensOf, withoutOldQuestions, withoutQuestions, withRows, withShell } from './state'
 import { NO_GIT } from './github'
 import { noteCompaction, noteTool, noteTurnEnd, noteTurnStart, refreshContext } from './usage'
 
@@ -26,6 +26,9 @@ const choices = atom({ plugin: 'agent-team', key: 'choices' } as const, NO_CHOIC
 const delegation = atom({ plugin: 'agent-team', key: 'delegation' } as const, true)
 const logged = atom({ plugin: 'agent-team', key: 'logged' } as const, NO_LOGGED)
 const models = atom({ plugin: 'agent-team', key: 'models' } as const, DEFAULT_MODELS)
+const soundOn = atom({ plugin: 'agent-team', key: 'soundOn' } as const, true)
+const notifyOn = atom({ plugin: 'agent-team', key: 'notifyOn' } as const, true)
+const updating = atom({ plugin: 'agent-team', key: 'updating' } as const, false)
 
 /** Reads the context breakdown again when the usage tab is the one shown: a hidden tab reads it when it opens. */
 const refreshIfShown = ($: EngineInterface): Promise<void> =>
@@ -48,7 +51,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: COMMAND,
       description: t('command.description'),
-      argumentHint: '[rules [off]]',
+      argumentHint: '[rules [off] | update]',
     })
     // Open unless the person hid it with /agent-team, a choice kept across sessions.
     const wasHidden = await $.store.get(OPEN_KEY).then(
@@ -65,6 +68,14 @@ export const register: Register = (on, options) => {
     await quietly(update($, models, () => storedModels))
     const storedDelegation = await $.store.get(DELEGATION_KEY).then(v => v !== false, () => true)
     await quietly(update($, delegation, () => storedDelegation))
+    // Sounds and system notifications stay as the person last left them in the pane: on unless turned off.
+    const storedSound = await $.store.get(SOUND_KEY).then(v => v !== false, () => true)
+    await quietly(update($, soundOn, () => storedSound))
+    const storedNotify = await $.store.get(NOTIFY_KEY).then(v => v !== false, () => true)
+    await quietly(update($, notifyOn, () => storedNotify))
+    // State outlives a reload, and an update's reload may land before its run cleared the busy mark: the mark says
+    // what this code runs now. A /clear starts a session in the same process, where an update may still be running.
+    await quietly(update($, updating, () => isUpdateRunning()))
     const storedTab = await $.store.get(TAB_KEY).then(tabFrom, () => undefined)
     if (storedTab !== undefined) await quietly(update($, tab, () => storedTab))
     // The usage tab, when it is the one shown, has its figures from the start.
@@ -151,6 +162,9 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // After a /clear nobody waits for answers in the new conversation.
+    if (e.reason === 'clear') await quietly(update($, team, t => ({ ...t, agents: withoutQuestions(t.agents) })))
+
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -191,15 +205,28 @@ export const register: Register = (on, options) => {
     const isOn = await $.store.get(DELEGATION_KEY).then(v => v !== false, () => true)
     if (!isOn) return described
     // The roles' models, from the store: the tool may be described before session.start has read them.
-    const chosen = await $.store.get(MODELS_KEY).then(modelsFrom, () => DEFAULT_MODELS)
+    // What it holds is the pane's too: another window's change shows in this one's Models block.
+    const stored = await $.store.get(MODELS_KEY).then(modelsFrom, () => undefined)
+    if (stored !== undefined) await quietly(update($, models, () => stored))
 
-    return { ...described, description: withTeamDelegation(described.description, chosen) }
+    return { ...described, description: withTeamDelegation(described.description, stored ?? DEFAULT_MODELS) }
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     await settleLanguage($, options.language)
-    // `/agent-team rules` and `/agent-team rules off` handle the team rules in CLAUDE.md; bare, the command toggles the pane.
+    // `/agent-team rules` and `/agent-team rules off` handle the team rules in CLAUDE.md, `/agent-team update`
+    // installs the latest release; bare, the command toggles the pane.
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(word => word !== '')
+    if (words.length === 1 && words[0] === 'update') {
+      // The plugin is the person's: only a command they typed may update it, not a plugin, a schedule or a notification.
+      if (!PERSON_ORIGINS.has(e.origin.kind)) return { text: t('update.now.typed') }
+
+      // The reload runs after this answer, in a dispatch of its own: it may swap this code out.
+      const done = await updateNow($)
+      if (done.shouldReload) reloadPlugins($)
+
+      return { text: done.text }
+    }
     if (words.length > 0) {
       const isRules = words[0] === 'rules' && (words.length === 1 || (words[1] === 'off' && words.length === 2))
       // CLAUDE.md is the person's: only a command they typed may change it, not a plugin, a schedule or a notification.
@@ -260,7 +287,8 @@ export const register: Register = (on, options) => {
     await quietly(
       update($, team, t => ({
         ...t,
-        agents: withRows(t.agents, [marked]),
+        // A new agent of a role, sent instead of continuing one that asked: the older ones no longer wait.
+        agents: withRows(isNew ? withoutOldQuestions(t.agents, marked) : t.agents, [marked]),
         main: isFromClaude && row.role === 'explorer' ? { ...t.main, hasAskedExplorer: true } : t.main,
       })),
     )
@@ -360,6 +388,8 @@ export const register: Register = (on, options) => {
     // The choices come from the store, as the team paragraph's do: another window's change counts here too.
     if (e.tool === 'Agent') {
       const stored = await $.store.get(MODELS_KEY).then(modelsFrom, () => undefined)
+      // What the store holds is the pane's too: another window's change shows in this one's Models block.
+      if (stored !== undefined) await quietly(update($, models, () => stored))
       const chosen = chosenFor(e, stored ?? (await read($, models)))
 
       return next(chosen === undefined ? e : { ...e, ...chosen })
@@ -452,6 +482,9 @@ export const register: Register = (on, options) => {
                     tokens: undefined,
                     answer: undefined,
                     skills: undefined,
+                    // Woken after it asked: this round answers its questions, and its wire's pulse says so.
+                    questions: undefined,
+                    answering: a.questions !== undefined ? true : undefined,
                     turnId: e.turnId,
                     // Rounds are the team rules' count: an agent outside the team has none.
                     rounds: TEAM_TYPES.has(a.type) ? (a.rounds ?? 0) + 1 : a.rounds,
@@ -526,6 +559,9 @@ export const register: Register = (on, options) => {
       // StopFailure, when it came first, put the precise API error on the running row: it stays.
       const apiError = ending?.status === 'running' ? ending.endNote : undefined
       const endNote = e.reason === 'aborted' ? t('end.aborted') : e.reason === 'error' ? (apiError ?? t('end.error')) : undefined
+      // A report that opens with QUESTIONS: is an agent waiting for answers, read from the whole report before it is clipped.
+      const questions = e.reason === 'answer' ? questionsOf(e.answer) : undefined
+      const endKey = questions !== undefined ? 'notify.asking' : status === 'done' ? 'notify.done' : 'notify.failed'
       await quietly(
         update($, team, t => ({
           ...endRow(
@@ -537,6 +573,8 @@ export const register: Register = (on, options) => {
               tokens,
               endNote,
               answer: e.reason === 'refusal' ? undefined : e.answer.slice(0, 2000),
+              questions,
+              answering: undefined,
               turnId: e.turnId,
               ...(e.usage?.model !== undefined ? { model: e.usage.model } : {}),
             },
@@ -551,11 +589,11 @@ export const register: Register = (on, options) => {
       if (ending !== undefined && ending.status === 'running' && status !== 'stopped' && at - ending.startedAt >= LONG_MS) {
         const what = nameOf(ending.role)
         const time = seconds(at - ending.startedAt)
-        void announce($, `${t(status === 'done' ? 'notify.done' : 'notify.failed', { what, time })}: ${ending.description}`)
+        void announce($, `${t(endKey, { what, time })}: ${ending.description}`)
       }
       if (missed !== undefined && status !== 'stopped' && e.durationMs >= LONG_MS) {
         const what = nameOf(missed.role)
-        void announce($, `${t(status === 'done' ? 'notify.done' : 'notify.failed', { what, time: seconds(e.durationMs) })}: ${missed.description}`)
+        void announce($, `${t(endKey, { what, time: seconds(e.durationMs) })}: ${missed.description}`)
       }
     }
 

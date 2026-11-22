@@ -1,11 +1,11 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { drawTeam, FAILED_RESTING, toolKindOf } from '../hooks/drawing'
+import { drawTeam, FAILED_RESTING, SHAKE, toolKindOf } from '../hooks/drawing'
 import { setLanguage } from '../hooks/i18n'
 import { AFTERGLOW_MS, EMPTY, isAlive, isStill, MAIN_END_MS, STILL_MS } from '../hooks/state'
 import type { AgentRow, MainLoop, Team, Usage } from '../types'
-import { PANE, boot, start } from './support'
+import { PANE, boot, spawn, start } from './support'
 
 setLanguage('es')
 
@@ -35,13 +35,13 @@ test('an idle Claude breathes and blinks twice now and then, instead of bobbing'
   expect(svg).toContain('type="scale"')
   expect(svg).toContain('dur="4.4s"')
   expect(svg).toContain('keyTimes="0;0.82;0.855;0.89;0.925;0.96;1"')
-  expect(svg).not.toMatch(/values="0 0;0 -3;0 0" dur="2.4s"/)
+  expect(svg).not.toMatch(/values="0 0;0 -3;0 0" [^>]*dur="2.4s"/)
 })
 
 test('a working Claude keeps its quick bob and does not breathe', async () => {
   const svg = drawTeam(working(), AT, USAGE)
 
-  expect(svg).toMatch(/values="0 0;0 -3;0 0" dur="0.6s"/)
+  expect(svg).toMatch(/values="0 0;0 -3;0 0" [^>]*dur="0.6s"/)
   expect(svg).not.toContain('type="scale" values="1 1;1.02')
 })
 
@@ -162,6 +162,58 @@ test('the markup is the same on every tick of a state', async () => {
   }
 })
 
+test('a busy pane, limits near their end included, draws the same markup a second and two seconds later', async () => {
+  const shell = { id: 'sh1', tool: 'Bash', description: 'Serve', command: 'npm run dev', startedAt: AT - 20_000, diag: '' }
+  const job = { id: 'j1', kind: 'build' as const, manager: 'npm', target: 'app', tool: 'Bash', command: 'npm run build', startedAt: AT - 9000, status: 'running' as const }
+  const squad: Team = {
+    ...working({ lastTool: 'Read' }, [agent({ startedAt: AT - 60_000 }), agent({ id: 'a2', role: 'tester', type: 'agent-team:tester', startedAt: AT - 40_000 })]),
+    shells: [shell],
+    jobs: [job],
+  }
+  const busy: Usage = {
+    at: AT - 30_000,
+    windows: [
+      { kind: 'five_hour', percent: 85, resetsAt: AT + 2 * 60 * 60 * 1000 },
+      { kind: 'seven_day', percent: 97 },
+    ],
+    context: { percent: 31, tokens: 62_000, window: 200_000 },
+    trail: { points: [[AT - 90 * 60_000, 40], [AT - 30_000, 85]] },
+  }
+  const first = drawTeam(squad, AT, busy)
+  for (const later of [1000, 2000, 3000]) expect(drawTeam(squad, AT + later, busy)).toBe(first)
+})
+
+test('every eased animation has a spline per interval and key times from 0 to 1, as many as its values', async () => {
+  const shown = [
+    drawTeam(working({ lastTool: 'Read' }, [agent(), agent({ id: 'a2', role: 'implementer', type: 'agent-team:implementer' })]), AT, USAGE),
+    drawTeam(team({ endedAt: AT - 500, apiError: 'overloaded' }, [agent({ status: 'done', endedAt: AT - 500 })]), AT, USAGE),
+    drawTeam(team(), AT, USAGE),
+  ].join('')
+  const eased = shown.match(/<animate(?:Transform|Motion)? [^>]*calcMode="spline"[^>]*>/g) ?? []
+  expect(eased.length).toBeGreaterThan(10)
+  for (const tag of eased) {
+    const times = /keyTimes="([^"]+)"/.exec(tag)?.[1]?.split(';') ?? []
+    const splines = /keySplines="([^"]+)"/.exec(tag)?.[1]?.split(';') ?? []
+    const values = /values="([^"]+)"/.exec(tag)?.[1]?.split(';') ?? /keyPoints="([^"]+)"/.exec(tag)?.[1]?.split(';') ?? []
+    expect(times[0]).toBe('0')
+    expect(times[times.length - 1]).toBe('1')
+    expect(times.length).toBe(values.length)
+    expect(splines.length).toBe(times.length - 1)
+  }
+  // the moves are eased: no position, rotation or scale left on a constant speed, save the wire's endless dashes
+  const linear = (shown.match(/<animate(?:Transform|Motion)? [^>]*>/g) ?? []).filter(
+    tag => !tag.includes('calcMode="spline"') && /attributeName="(transform|x|y|cy|r)"|<animateMotion/.test(tag),
+  )
+  expect(linear).toEqual([])
+})
+
+test('a shake glides under a sprite pixel each way instead of jumping whole pixels', async () => {
+  const amplitudes = [...SHAKE.matchAll(/(-?[0-9.]+) 0/g)].map(m => Math.abs(Number(m[1])))
+  expect(Math.max(...amplitudes)).toBeLessThan(6)
+  expect(amplitudes.length).toBeGreaterThan(5)
+  expect(SHAKE).toContain('calcMode="spline"')
+})
+
 test('tool calls of the same kind, and their count, do not change the markup', async () => {
   const at = (calls: number, tool: string) => drawTeam(working({ calls, lastTool: tool, lastDetail: `${calls}` }), AT, USAGE)
 
@@ -203,12 +255,12 @@ test('an API error shakes Claude and marks it with a red !, and no check', async
   const failed = team({ endedAt: AT - 500, apiError: 'overloaded' })
   const svg = drawTeam(failed, AT, USAGE)
 
-  expect(svg).toContain('values="-3 0;3 0;-3 0;3 0;0 0"')
+  expect(svg).toContain(SHAKE)
   expect(svg).toContain('fill="#ff5c5c">!</text>')
   expect(svg).not.toContain('stroke="#4caf50"')
   // later the shake is gone and the mark stays until the next turn
   const later = drawTeam(team({ endedAt: AT - 5000, apiError: 'overloaded' }), AT, USAGE)
-  expect(later).not.toContain('values="-3 0;3 0;-3 0;3 0;0 0"')
+  expect(later).not.toContain(SHAKE)
   expect(later).toContain('fill="#ff5c5c">!</text>')
 })
 
@@ -289,4 +341,33 @@ test('a turn of tools redraws only when the kind of tool changes, and checks off
   expect(await sourceOf($)).toContain('stroke="#4caf50"')
   await world.clock.advance(3000)
   expect(await sourceOf($)).not.toContain('stroke="#4caf50"')
+})
+
+test('while Claude, an agent and a background shell work, the ticker redraws the pane with the same drawing every second', async ($, on) => {
+  const world = boot(on)
+  await start($)
+  const at = world.clock.now()
+  await $.session.measure({
+    context: { window: 200_000, tokens: 62_000, percent: 31 },
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 85, resetsAt: new Date(at + 2 * 60 * 60 * 1000).toISOString() },
+      { kind: 'seven_day', percentUsed: 97 },
+    ],
+    changed: ['rateLimits', 'context'],
+  } as never)
+  await $.turn.start({ text: 'go', turnId: 'm1' } as never)
+  await spawn($, 'a1', 'agent-team:implementer')
+  world.toolResult = () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1' }, text: 'Command running in background with ID: b1.' })
+  await $.tool.call({ tool: 'Bash', command: 'sleep 100', description: 'Sleep', run_in_background: true } as never)
+  world.toolResult = undefined
+  // past the out pulse, so no window edge falls in the seconds measured
+  await world.clock.advance(5000)
+  await world.clock.settle()
+  const first = await sourceOf($)
+  expect(first).toContain(`stroke="${'#5b8def'}"`)
+  for (let k = 0; k < 4; k += 1) {
+    await world.clock.advance(1000)
+    await world.clock.settle()
+    expect(await sourceOf($)).toBe(first)
+  }
 })

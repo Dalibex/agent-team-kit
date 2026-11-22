@@ -600,8 +600,29 @@ test('each card is titled in the drawing’s neon pixel letters, and in words on
   expect(titles).toEqual(['Equipo', 'Skills', 'Instalaciones y procesos', 'GitHub'])
   await onTab($, 'team')
 
-  expect(await shows($, 'terminal', /^Equipo$/)).toBe(true)
-  expect(await shows($, 'desktop', /^Equipo$/)).toBe(false)
+  expect(await shows($, 'terminal', /^Instalaciones y procesos$/, 'Text', 'jobs')).toBe(true)
+  expect(await shows($, 'desktop', /^Instalaciones y procesos$/, 'Text', 'jobs')).toBe(false)
+})
+
+test('the desktop Team card is titled by its pixel plate, while its "Equipo" section header is text', async ($, on) => {
+  boot(on)
+  await start($)
+  await onTab($, 'team')
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const images = await ui.findAll({ type: 'Svg' })
+  // the drawing, then the team card's plate
+  expect(images).toHaveLength(2)
+  expect(images[1]?.props.alt).toBe('Equipo')
+  // the card's own title in words (✦ and the name) is the terminal's: the desktop draws the plate instead
+  expect(await ui.find({ type: 'Text', text: /^✦ $/ })).toBeUndefined()
+  // the section header that folds the team's settings is a button with its title in words
+  const header = await ui.find({ type: 'Button', key: 'fold-config' })
+  expect(header?.props.label).toBe('Equipo')
+  await ui.unmount()
+  const terminal = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await terminal.find({ type: 'Text', text: /^✦ $/ })).toBeDefined()
+  expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
+  await terminal.unmount()
 })
 
 test('resting the pointer on the drawing shows what each gauge means', async ($, on) => {
