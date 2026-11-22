@@ -13,7 +13,7 @@ const ENGLISH = { LANG: 'en_US.UTF-8' } as const
 const tabLabels = async ($: Engine): Promise<string[]> => {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const labels: string[] = []
-  for (const id of ['team', 'skills', 'jobs', 'github'] as const) {
+  for (const id of ['team', 'skills', 'jobs', 'github', 'usage'] as const) {
     labels.push(String((await ui.find({ type: 'Button', key: `tab-${id}` }))?.props.label))
   }
   await ui.unmount()
@@ -21,8 +21,8 @@ const tabLabels = async ($: Engine): Promise<string[]> => {
   return labels
 }
 
-const IN_ENGLISH = ['Team', 'Skills', 'Jobs', 'GitHub']
-const IN_SPANISH = ['Equipo', 'Skills', 'Procesos', 'GitHub']
+const IN_ENGLISH = ['Team', 'Skills', 'Jobs', 'GitHub', 'Usage']
+const IN_SPANISH = ['Equipo', 'Skills', 'Procesos', 'GitHub', 'Uso']
 
 // ------------------------------------------------------------ the catalog
 
@@ -36,7 +36,7 @@ test('both languages hold the same texts, with the same slots, and the plates on
     expect(CATALOG.es[key], key).not.toBe('')
     expect(slots(CATALOG.es[key]), key).toEqual(slots(CATALOG.en[key]))
   }
-  for (const key of ['plate.team', 'plate.skills', 'plate.jobs', 'plate.github'] as const) {
+  for (const key of ['plate.team', 'plate.skills', 'plate.jobs', 'plate.github', 'plate.usage'] as const) {
     for (const lang of ['en', 'es'] as const) {
       expect([...CATALOG[lang][key]].every(ch => FONT[ch] !== undefined), `${lang} ${key}`).toBe(true)
     }
@@ -90,12 +90,12 @@ test('English: a brief without Goal or Why is flagged in English, and the status
   expect((await $.command.run(AGENT_TEAM_COMMAND)).text).toBe('Pane Agent team open.')
 })
 
-test('English: the card titles are pixel plates TEAM, SKILLS, JOBS and GITHUB, with English alt texts', async ($, on) => {
+test('English: the card titles are pixel plates TEAM, SKILLS, JOBS, GITHUB and USAGE, with English alt texts', async ($, on) => {
   boot(on, { env: ENGLISH })
   await start($)
   const alts: unknown[] = []
   const widths: unknown[] = []
-  for (const id of ['team', 'skills', 'jobs', 'github'] as const) {
+  for (const id of ['team', 'skills', 'jobs', 'github', 'usage'] as const) {
     await onTab($, id)
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
     const images = await ui.findAll({ type: 'Svg' })
@@ -103,8 +103,8 @@ test('English: the card titles are pixel plates TEAM, SKILLS, JOBS and GITHUB, w
     widths.push(images[1]?.props.width)
     await ui.unmount()
   }
-  expect(alts).toEqual(['Team', 'Skills', 'Installs and processes', 'GitHub'])
-  expect(widths).toEqual(['TEAM', 'SKILLS', 'JOBS', 'GITHUB'].map(word => titlePlate(word, '#000000').width))
+  expect(alts).toEqual(['Team', 'Skills', 'Installs and processes', 'GitHub', 'Usage'])
+  expect(widths).toEqual(['TEAM', 'SKILLS', 'JOBS', 'GITHUB', 'USAGE'].map(word => titlePlate(word, '#000000').width))
   await onTab($, 'team')
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })

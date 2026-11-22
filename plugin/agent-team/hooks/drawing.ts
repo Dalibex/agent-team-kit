@@ -4,14 +4,14 @@ import type { AgentRow, AgentStatus, Role, Team, Usage } from '../types'
 import { t } from './i18n'
 import { levelOf, percentText, projectionOf, resetClock, roundTokens, windowName } from './usage'
 import { ASLEEP, BRAND, branding, CARD, CONTEXT_COLOR, esc, INK, LEVEL_COLOR, LOOK, neonTint, neonWord, nameOf, pixelWord, starfield, statusText, twinkle, WARN, wordWidth } from './look'
-import { AFTERGLOW_MS, familyOf, isAlive, isOverReading, isShellRunning, PULSE_MS } from './state'
+import { AFTERGLOW_MS, familyOf, isAlive, isOverReading, isShellRunning, isStill, MAIN_END_MS, PULSE_MS } from './state'
 
 // ---------------------------------------------------------------- sprites
 
 export type Mood = 'asleep' | 'awake' | 'busy'
 
-/** Two eyes that blink now and then; open, closed lines while asleep. */
-export const eyes = (x: number, y: number, s: number, isAsleep: boolean, dur: string): string => {
+/** Two eyes that blink now and then (twice in a row when `isDouble`); open, closed lines while asleep. */
+export const eyes = (x: number, y: number, s: number, isAsleep: boolean, dur: string, isDouble = false): string => {
   if (isAsleep) {
     return [2, 6]
       .map(col => `<rect x="${x + col * s}" y="${y + 4 * s}" width="${2 * s}" height="${s}" fill="${INK}"/>`)
@@ -19,28 +19,29 @@ export const eyes = (x: number, y: number, s: number, isAsleep: boolean, dur: st
   }
   const top = y + 3 * s
   const shut = y + 3.8 * s
-  const times = 'keyTimes="0;0.9;0.95;1"'
+  const times = isDouble ? 'keyTimes="0;0.82;0.855;0.89;0.925;0.96;1"' : 'keyTimes="0;0.9;0.95;1"'
+  const open = 2 * s
+  const closed = 0.4 * s
+  const heights = isDouble ? [open, open, closed, open, closed, open, open] : [open, open, closed, open]
+  const tops = isDouble ? [top, top, shut, top, shut, top, top] : [top, top, shut, top]
 
   return [3, 6]
     .map(
       col =>
         `<rect x="${x + col * s}" y="${top}" width="${s}" height="${2 * s}" fill="${INK}">` +
-        `<animate attributeName="height" values="${2 * s};${2 * s};${0.4 * s};${2 * s}" ${times} dur="${dur}" repeatCount="indefinite"/>` +
-        `<animate attributeName="y" values="${top};${top};${shut};${top}" ${times} dur="${dur}" repeatCount="indefinite"/></rect>`,
+        `<animate attributeName="height" values="${heights.join(';')}" ${times} dur="${dur}" repeatCount="indefinite"/>` +
+        `<animate attributeName="y" values="${tops.join(';')}" ${times} dur="${dur}" repeatCount="indefinite"/></rect>`,
     )
     .join('')
 }
 
-/** Little z's drifting up from a sleeper. */
-export const snore = (x: number, y: number, s: number): string =>
-  [0, 1, 2]
-    .map(
-      i =>
-        `<text x="${x + 9 * s}" y="${y + 2 * s}" font-size="${9 + i * 2}" font-weight="bold" fill="#8f8bb0" opacity="0">z` +
-        `<animate attributeName="opacity" values="0;0.85;0" dur="3.6s" begin="${i * 1.2}s" repeatCount="indefinite"/>` +
-        `<animateTransform attributeName="transform" type="translate" values="0 0;${1.5 * s} ${-3 * s}" dur="3.6s" begin="${i * 1.2}s" repeatCount="indefinite"/></text>`,
-    )
-    .join('')
+/** A little z drifting up from a sleeper; a still pose keeps it where it ends, faint. */
+export const snore = (x: number, y: number, s: number, isStill = false): string =>
+  isStill
+    ? `<text x="${x + 9 * s + 1.5 * s}" y="${y + 2 * s - 3 * s}" font-size="11" font-weight="bold" fill="#8f8bb0" opacity="0.5">z</text>`
+    : `<text x="${x + 9 * s}" y="${y + 2 * s}" font-size="11" font-weight="bold" fill="#8f8bb0" opacity="0">z` +
+      `<animate attributeName="opacity" values="0;0.85;0" dur="3.6s" repeatCount="indefinite"/>` +
+      `<animateTransform attributeName="transform" type="translate" values="0 0;${1.5 * s} ${-3 * s}" dur="3.6s" repeatCount="indefinite"/></text>`
 
 /** Each role's prop and its own animation. */
 export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): string => {
@@ -147,28 +148,130 @@ export const gear = (x: number, y: number, s: number, role: Role, mood: Mood): s
   }
 }
 
+/** A piece of drawing without its SMIL: what is left is its still pose. */
+const frozen = (markup: string): string => markup.replace(/<animate(?:Transform|Motion)?[^>]*\/>/g, '')
+
 /**
  * A pixel Claude: a rounded 8x8 body with two eyes and four legs, drawn as
  * rects on a 10x10 grid scaled by `s`, with its role's prop. Awake it bobs
- * and blinks (quicker while busy); asleep it goes grey and snores.
+ * and blinks (quicker while busy); Claude itself breathes slowly while idle
+ * and blinks twice now and then; asleep it goes grey and snores. `isStill`
+ * holds a static pose, no animation at all.
  */
-export const sprite = (x: number, y: number, role: Role, mood: Mood, s: number): string => {
+export const sprite = (x: number, y: number, role: Role, mood: Mood, s: number, isStill = false): string => {
   const isAsleep = mood === 'asleep'
   const c = isAsleep ? ASLEEP : LOOK[role].color
   const px = (col: number, row: number, w: number, h: number) =>
     `<rect x="${x + col * s}" y="${y + row * s}" width="${w * s}" height="${h * s}" fill="${c}"/>`
   // body: rows 1..7, with the corners cut for the rounded look, then the legs
   const body = [px(2, 1, 6, 1), px(1, 2, 8, 5), px(2, 7, 6, 1), px(1, 8, 1, 1), px(3, 8, 1, 1), px(6, 8, 1, 1), px(8, 8, 1, 1)].join('')
-  const look = eyes(x, y, s, isAsleep, role === 'reviewer' ? '3.4s' : '4.2s')
+  const look = eyes(x, y, s, isAsleep, role === 'reviewer' ? '3.4s' : role === 'main' ? '5.7s' : '4.2s', role === 'main')
   // the explorer's eyes glance side to side, looking for things
   const face =
     role === 'explorer' && !isAsleep
       ? `<g>${look}<animateTransform attributeName="transform" type="translate" values="0 0;${0.6 * s} 0;0 0;${-0.6 * s} 0;0 0" dur="3.2s" repeatCount="indefinite"/></g>`
       : look
   const inner = body + face + gear(x, y, s, role, mood)
+  if (isStill) return `<g>${frozen(inner)}</g>` + (isAsleep ? snore(x, y, s, true) : '')
   if (isAsleep) return inner + snore(x, y, s)
+  if (role === 'main' && mood === 'awake') {
+    // breathing: a small vertical swell from the feet, slow and eased
+    const cx = x + 5 * s
+    const fy = y + 9 * s
+
+    return (
+      `<g transform="translate(${cx} ${fy})"><g>` +
+      `<animateTransform attributeName="transform" type="scale" values="1 1;1.02 1.045;1 1" keyTimes="0;0.5;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" dur="4.4s" repeatCount="indefinite"/>` +
+      `<g transform="translate(${-cx} ${-fy})">${inner}</g></g></g>`
+    )
+  }
 
   return `<g>${inner}<animateTransform attributeName="transform" type="translate" values="0 0;0 ${-s / 2};0 0" dur="${mood === 'busy' ? '0.6s' : '2.4s'}" repeatCount="indefinite"/></g>`
+}
+
+/** Which little picture a tool gets above Claude's head. */
+export type ToolKind = 'read' | 'edit' | 'shell' | 'search' | 'web' | 'other'
+
+export const toolKindOf = (tool: string | undefined): ToolKind => {
+  switch (tool) {
+    case 'Read':
+    case 'NotebookRead':
+      return 'read'
+    case 'Edit':
+    case 'Write':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return 'edit'
+    case 'Bash':
+    case 'PowerShell':
+      return 'shell'
+    case 'Grep':
+    case 'Glob':
+      return 'search'
+    case 'WebFetch':
+    case 'WebSearch':
+      return 'web'
+    default:
+      return 'other'
+  }
+}
+
+/** Seven by seven pixels each; 1 is a lit pixel. */
+const ICONS: Record<ToolKind, string[]> = {
+  read: ['0111110', '0100010', '0101110', '0100010', '0101110', '0100010', '0111110'],
+  edit: ['0000011', '0000111', '0001110', '0011100', '0111000', '1110000', '1100000'],
+  shell: ['1000000', '0100000', '0010000', '0100000', '1000000', '0000000', '0011110'],
+  search: ['0111000', '1000100', '1000100', '1000100', '0111010', '0000101', '0000011'],
+  web: ['0111110', '1010101', '1010101', '1111111', '1010101', '1010101', '0111110'],
+  other: ['0010100', '0111110', '1101011', '1110111', '1101011', '0111110', '0010100'],
+}
+
+/** The badge's size, and where it sits relative to the lead's centre: up on the head's left, clear of the antenna. */
+const BADGE = { w: 32, h: 26, dx: -57, dy: 4 }
+
+/**
+ * The tool Claude runs now, as a small pixel icon in a badge above its head.
+ * It pops in once (a scale from nothing, held at its end), so it stays put
+ * for as long as the markup does not change.
+ */
+export const toolIcon = (leadX: number, leadTop: number, kind: ToolKind): string => {
+  const bx = leadX + BADGE.dx
+  const by = leadTop + BADGE.dy
+  const p = 2.4
+  const ix = bx + (BADGE.w - 7 * p) / 2
+  const iy = by + (BADGE.h - 7 * p) / 2
+  const cx = bx + BADGE.w / 2
+  const cy = by + BADGE.h / 2
+  const px = ICONS[kind].flatMap((row, r) =>
+    [...row].flatMap((bit, col) => (bit === '1' ? [`<rect x="${(ix + col * p).toFixed(1)}" y="${(iy + r * p).toFixed(1)}" width="${p}" height="${p}"/>`] : [])),
+  )
+
+  return (
+    `<g id="dx-tool-${kind}" transform="translate(${cx} ${cy})"><g>` +
+    `<animateTransform attributeName="transform" type="scale" values="0;1.18;1" keyTimes="0;0.6;1" dur="0.3s" fill="freeze"/>` +
+    `<g transform="translate(${-cx} ${-cy})">` +
+    `<rect x="${bx}" y="${by}" width="${BADGE.w}" height="${BADGE.h}" rx="7" fill="#2b2440" stroke="${LOOK.main.color}" stroke-width="1.5"/>` +
+    `<g fill="#ffd166">${px.join('')}</g></g></g></g>`
+  )
+}
+
+/** Claude thinking: a small cloud of three dots that light in turn, with its two trailing bubbles. */
+export const thoughtBubble = (leadX: number, leadTop: number): string => {
+  const bx = leadX + BADGE.dx
+  const by = leadTop + BADGE.dy
+  const dots = [0, 1, 2]
+    .map(
+      i =>
+        `<circle cx="${bx + 9 + i * 8}" cy="${by + BADGE.h / 2}" r="2.6" fill="#ffd166" opacity="0.25">` +
+        `<animate attributeName="opacity" values="0.25;1;0.25" keyTimes="0;0.33;0.66" dur="1.5s" begin="${i * 0.5}s" repeatCount="indefinite"/></circle>`,
+    )
+    .join('')
+
+  return (
+    `<g id="dx-thinking"><rect x="${bx}" y="${by}" width="${BADGE.w}" height="${BADGE.h}" rx="13" fill="#2b2440" stroke="#8f8bb0" stroke-width="1.5"/>` +
+    `<circle cx="${bx + BADGE.w - 4}" cy="${by + BADGE.h + 4}" r="3" fill="#2b2440" stroke="#8f8bb0" stroke-width="1.2"/>` +
+    `<circle cx="${bx + BADGE.w + 1}" cy="${by + BADGE.h + 10}" r="1.8" fill="#2b2440" stroke="#8f8bb0" stroke-width="1"/>${dots}</g>`
+  )
 }
 
 /** A green check; drawn on with a stroke when `isFresh`, else just there. */
@@ -441,6 +544,8 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
   // The title's shimmer and the stars move only while something is live: the
   // blur over hundreds of pixels is the costly part of an idle pane.
   const isLive = isAlive(squad, at)
+  // After a quiet minute the sprites hold a still pose until something happens.
+  const isResting = isStill(squad, at)
   const out: string[] = []
 
   out.push(
@@ -486,11 +591,36 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
   const shellsAlive = squad.shells.some(sh => sh.owner === undefined && isShellRunning(sh, at))
   const isWorking = squad.main.status === 'working' || shellsAlive
   const anyRunning = squad.agents.some(a => a.status === 'running')
+  // Claude's own moments. Each depends on `at` only through a window, never on a count or a clock.
+  const main = squad.main
+  const sinceEnd = main.endedAt === undefined ? Infinity : at - main.endedAt
+  const handoff = slots.findIndex(sl => pulseOf(sl.agent, at) === 'out')
+  // The bubble shows before Claude's first tool of the turn, then the last tool's icon stays until the next one or the end:
+  // the picture changes only with the kind of tool, never between two tools.
+  const isInTool = main.status === 'working' && main.lastTool !== undefined
+  const isThinking = main.status === 'working' && main.lastTool === undefined && !anyRunning
+  const hasFailed = main.apiError !== undefined
+  let claude = sprite(leadX - 5 * s, leadTop + 14, 'main', isWorking ? 'busy' : 'awake', s, isResting)
+  if (hasFailed && sinceEnd < MAIN_END_MS) {
+    // a shake: the turn ended in an API error
+    claude = `<g>${claude}<animateTransform attributeName="transform" type="translate" values="-3 0;3 0;-3 0;3 0;0 0" dur="0.5s" repeatCount="2"/></g>`
+  } else if (handoff >= 0) {
+    // a step towards the slot it just sent work to, once
+    const lean = Math.max(-8, Math.min(8, (colW * handoff + colW / 2 - leadX) / 12))
+    claude = `<g>${claude}<animateTransform attributeName="transform" type="translate" values="0 0;${lean.toFixed(1)} -2;0 0" keyTimes="0;0.4;1" dur="0.6s"/></g>`
+  }
   out.push(
     `<rect x="${leadX - leadW / 2}" y="${leadTop}" width="${leadW}" height="${leadH}" rx="12" fill="${isWorking ? '#241a22' : '#1a1622'}" stroke="${isWorking || anyRunning ? LOOK.main.color : '#5a3a2a'}" stroke-width="2"/>`,
-    sprite(leadX - 5 * s, leadTop + 14, 'main', isWorking ? 'busy' : 'awake', s),
+    claude,
     `<text x="${leadX}" y="${leadTop + 80}" text-anchor="middle" font-size="${fs}" fill="${LOOK.main.color}">Claude</text>`,
   )
+  if (isInTool) out.push(toolIcon(leadX, leadTop, toolKindOf(main.lastTool)))
+  else if (isThinking) out.push(thoughtBubble(leadX, leadTop))
+  if (hasFailed) {
+    out.push(`<text x="${leadX + leadW / 2 - 14}" y="${leadTop + 40}" text-anchor="middle" font-size="18" font-weight="bold" fill="#ff5c5c">!</text>`)
+  } else if (main.endedOk === true && sinceEnd < MAIN_END_MS) {
+    out.push(check(leadX + 44, leadTop + 28, true))
+  }
   if (isOverReading(squad.main)) {
     const bx = leadX + leadW / 2 - 4
     const by = leadTop + 4
@@ -500,7 +630,8 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
         `<text x="${bx}" y="${by + 4.5}" text-anchor="middle" font-size="13" font-weight="bold" fill="${INK}">!</text></g>`,
     )
   }
-  out.push(heartbeat(leadX - leadW / 2 + 14, leadTop + leadH - 16, leadW - 28, LOOK.main.color, isWorking ? 'running' : undefined, squad.main.calls))
+  // the bar carries no call count: that would change the markup every few tool calls
+  out.push(heartbeat(leadX - leadW / 2 + 14, leadTop + leadH - 16, leadW - 28, LOOK.main.color, isWorking ? 'running' : undefined, 0))
 
   // wires and slots
   slots.forEach((slot, i) => {
@@ -527,7 +658,7 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     // One-shot effects (confetti, the shake, the check drawn on) live only in
     // the pulse window: a redraw later in the afterglow would replay them.
     const isFresh = a?.endedAt !== undefined && at - a.endedAt < PULSE_MS
-    let body = sprite(cx - 5 * s, slotTop + 14, slot.role, mood, s)
+    let body = sprite(cx - 5 * s, slotTop + 14, slot.role, mood, s, isResting)
     if (isGlowing && a?.status === 'failed') {
       // a shake and a red mark: something went wrong
       if (isFresh) {

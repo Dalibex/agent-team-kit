@@ -17,7 +17,7 @@ const BRIEF = [
 
 // ------------------------------------------------------------ the spend line
 
-test('the team tab says what each role used this session and the team’s share', async ($, on) => {
+test('the usage tab says what each role used this session and the team’s share', async ($, on) => {
   boot(on)
   await start($)
   await spawn($, 'a1', 'agent-team:explorer', { prompt: BRIEF })
@@ -25,7 +25,8 @@ test('the team tab says what each role used this session and the team’s share'
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', usage: usage('claude-opus-5-5', 9000, 3000) })
 
   for (const piece of [/^Sesión$/, /^Claude 12k · 1 turno$/, /^explorer 4\.0k ×1$/, /^equipo 25 %$/]) {
-    expect(await shows($, 'desktop', piece, 'Text', 'team')).toBe(true)
+    expect(await shows($, 'desktop', piece, 'Text', 'usage')).toBe(true)
+    expect(await shows($, 'desktop', piece, 'Text', 'team')).toBe(false)
   }
 })
 

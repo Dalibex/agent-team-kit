@@ -395,12 +395,12 @@ test('with the variable unset or empty the request is made', async ($, on) => {
 
 test('the update instruction is the two claude plugin commands and /reload-plugins, in the toast and the strip', async ($, on) => {
   const world = boot(on)
-  world.http = () => ({ status: 200, ok: true, headers: {}, text: JSON.stringify({ tag_name: 'v0.9.0', html_url: 'https://github.com/Dalibex/agent-team-kit/releases/tag/v0.9.0' }) })
+  world.http = () => ({ status: 200, ok: true, headers: {}, text: JSON.stringify({ tag_name: 'v9.9.0', html_url: 'https://github.com/Dalibex/agent-team-kit/releases/tag/v9.9.0' }) })
   await start($)
   await world.clock.advance(3500)
   await world.clock.settle()
 
-  const toast = world.toasts.find(text => text.includes('0.9.0')) ?? ''
+  const toast = world.toasts.find(text => text.includes('9.9.0')) ?? ''
   expect(toast).toContain('claude plugin marketplace update agent-team-kit')
   expect(toast).toContain('claude plugin update agent-team@agent-team-kit')
   expect(toast).toContain('/reload-plugins')

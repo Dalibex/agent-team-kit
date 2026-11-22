@@ -1,13 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, RenderChildren, RenderInput } from 'claude-code'
-import type { SlotPicker } from '../types'
+import type { SlotPicker, StatItem } from '../types'
 import { reviewText } from './github'
 import { jobTitle } from './jobs'
 import { t, tn } from './i18n'
-import { kilo, levelOf, percentText, projectionOf, resetClock, roundTokens, windowShort } from './usage'
-import { choose, compactNow, copyText, createPack, deletePack, openPicker, pickerBack, pickGroup, refreshGit, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, togglePack, toggleSkillEdit, turnPage, viewAgent } from './actions'
+import { kilo, levelOf, percentText, projectionOf, refreshContext, resetClock, roundTokens, windowShort } from './usage'
+import { barCells, cacheShare, contextPercent, inTokens, NO_STATS, STATS_SHAPE, toolItems, topRest } from './stats'
+import { choose, compactNow, copyText, createPack, deletePack, openPicker, pickerBack, pickGroup, quietly, refreshGit, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, togglePack, toggleSkillEdit, turnPage, viewAgent } from './actions'
 import { drawTeam, gaugesOf, overReadTitle, slotsOf, usageAlt } from './drawing'
-import { BRAND, branding, clockText, titlePlate, COMPACT_AT, CONTEXT_COLOR, DEFAULT_BRANCHES, GIT_COLOR, JOB_MARK, JOB_METER, LEVEL_COLOR, LOOK, meterCols, nameOf, seconds, SKILL_COLOR, SPINNER, STATUS_MARK, statusText, tokenLine, TRACK, WARN } from './look'
+import { BRAND, branding, clockText, titlePlate, COMPACT_AT, CONTEXT_COLOR, DEFAULT_BRANCHES, GIT_COLOR, JOB_MARK, JOB_METER, LEVEL_COLOR, LOOK, meterCols, nameOf, seconds, SKILL_COLOR, SPINNER, STATUS_MARK, statusText, tokenLine, TRACK, USAGE_COLOR, WARN } from './look'
 import { ciMark, EMPTY, familyOf, FIRST_TAB, spendParts, NO_PACKS, PACK_NAME_MAX, packDeleteAsk, PACKS_VIEW, freshOf, GIT_SHAPE, groupLabel, groupOf, isOverReading, jobRowsOf, NO_CHOICES, NO_GROUP, NO_IDS, NO_PICKER, NO_SLOTS, NO_UPDATE, PICK_PAGE, ROUNDS_LIMIT, runMark, sessionTokensOf, SHOWN_ROWS, SKILLS_EDIT, slotLabel, TABS, TEAM_SHAPE, USAGE_SHAPE } from './state'
 import type { CardId } from './state'
 import { NO_USAGE } from './usage'
@@ -29,6 +30,7 @@ const delegation = atom({ plugin: 'agent-team', key: 'delegation' } as const, tr
 const choices = atom({ plugin: 'agent-team', key: 'choices' } as const, NO_CHOICES)
 const picker = atom({ plugin: 'agent-team', key: 'picker' } as const, NO_PICKER)
 const updateNotice = atom({ plugin: 'agent-team', key: 'update' } as const, NO_UPDATE)
+const stats = atom({ plugin: 'agent-team', key: 'stats' } as const, NO_STATS, { shape: STATS_SHAPE })
 
 /**
  * The pane: the drawing (the team and its usage column), the line under it
@@ -54,6 +56,8 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const view = await read($, skillView)
   const isDelegating = await read($, delegation)
   const newer = await read($, updateNotice)
+  // The usage tab's figures are read only while it is shown: a hidden one is not redrawn by every tool call.
+  const counted = shown === 'usage' ? await read($, stats) : NO_STATS
   const cols = meterCols(e.props.bodyColumns)
 
   // Ids of rows that still exist: unfolding one also drops the ids of rows
@@ -295,21 +299,6 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
         )}
       </Box>,
     ]
-    // What the session has used so far, per role: the figure the team is there to keep down.
-    const spend = spendParts(squad)
-    if (spend.parts.length > 0) {
-      rows.push(
-        <Box key="team-spend" flexDirection="row" flexWrap="wrap" columnGap={2}>
-          <Text dimColor>{t('spend.label')}</Text>
-          {spend.parts.map(p => (
-            <Text key={`spend-${p.role}`} color={LOOK[p.role].color} dimColor>
-              {p.text}
-            </Text>
-          ))}
-          {spend.share !== '' && <Text dimColor>{spend.share}</Text>}
-        </Box>,
-      )
-    }
     for (const a of recent) {
       const isOpen = open.includes(a.id)
       const isRunning = a.status === 'running'
@@ -1019,13 +1008,192 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
     return out
   }
 
+  // ------------------------------------------------------- the usage
+
+  const usageBody = () => {
+    const rows: RenderChildren[] = []
+    // A swatch is the legend's coloured square; one without a colour is drawn dim.
+    const stat = (key: string, left: string, right: string, swatch?: { color?: string }) => (
+      <Box key={key} flexDirection="row" columnGap={1}>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text wrap="truncate-end">
+            {swatch !== undefined && <Text {...(swatch.color === undefined ? { dimColor: true } : { color: swatch.color })}>■ </Text>}
+            {left}
+          </Text>
+        </Box>
+        {right !== '' && (
+          <Box flexShrink={0}>
+            <Text dimColor>{right}</Text>
+          </Box>
+        )}
+      </Box>
+    )
+    /** A heading, the figure beside it when there is one; it wraps whole on a narrow pane. */
+    const heading = (key: string, title: string, figure = '') => (
+      <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={2}>
+        <Text color={USAGE_COLOR} bold>{title}</Text>
+        {figure !== '' && <Text dimColor>{figure}</Text>}
+      </Box>
+    )
+    /** The biggest few of a list and the rest summed, each with its tokens (and how many it groups). */
+    const list = (key: string, title: string, items: readonly StatItem[], extra?: string) => {
+      if (items.length === 0) return null
+      const { top, rest } = topRest(items)
+
+      return (
+        <Box key={key} flexDirection="column">
+          <Text dimColor>{title}</Text>
+          {top.map((one, i) => stat(`${key}-${i}`, one.count === undefined ? one.name : `${one.name} ×${one.count}`, kilo(one.tokens)))}
+          {rest !== undefined && stat(`${key}-rest`, t('usage.more', { n: rest.count }), kilo(rest.tokens))}
+          {extra !== undefined && <Text dimColor wrap="truncate-end">{extra}</Text>}
+        </Box>
+      )
+    }
+
+    const hasTokens = counted.turns > 0 || inTokens(counted) + counted.output > 0
+    const spend = spendParts(squad)
+    const tools = toolItems(counted.tools)
+    const hasSpend = spend.parts.length > 0 || tools.length > 0 || counted.top.length > 0
+    if (!hasTokens && !hasSpend && counted.context === undefined) {
+      return [<Text key="usage-none" dimColor wrap="wrap">{t('usage.none')}</Text>]
+    }
+
+    // 1. What the session moved: tokens in and out, how much came from the cache.
+    if (hasTokens) {
+      const share = cacheShare(counted)
+      rows.push(
+        <Box key="usage-tokens" flexDirection="column">
+          {heading('usage-tokens-h', t('usage.tokens'))}
+          <Text wrap="wrap">
+            {t('usage.tokens.line', { input: kilo(inTokens(counted)), output: kilo(counted.output) })}
+          </Text>
+          <Text dimColor wrap="wrap">
+            {[
+              share === undefined ? '' : t('usage.cache', { percent: share }),
+              tn(counted.turns, 'tokens.turns.one', 'tokens.turns.other'),
+              counted.compactions > 0 ? tn(counted.compactions, 'usage.compactions.one', 'usage.compactions.other') : '',
+            ]
+              .filter(part => part !== '')
+              .join(' · ')}
+          </Text>
+        </Box>,
+      )
+    }
+
+    // 2. The context now: a stacked bar, its legend, and the biggest items under it.
+    const ctx = counted.context
+    if (ctx === undefined) {
+      rows.push(
+        <Box key="usage-context" flexDirection="column">
+          {heading('usage-context-h', t('usage.context'))}
+          <Text dimColor wrap="wrap">{t('usage.context.waiting')}</Text>
+        </Box>,
+      )
+    } else {
+      const SHADES = [CONTEXT_COLOR, BRAND[0], BRAND[1], BRAND[3], SKILL_COLOR, USAGE_COLOR, '#8fbf6a', '#5b8def']
+      let usedAt = 0
+      const painted = ctx.rows.map(row => {
+        const color = row.kind === 'used' ? (SHADES[usedAt++ % SHADES.length] ?? CONTEXT_COLOR) : row.kind === 'buffer' ? '#6b6578' : undefined
+        const name = row.kind === 'free' ? t('usage.free') : row.kind === 'buffer' ? t('usage.buffer') : row.name
+
+        return { ...row, color, name }
+      })
+      const barWidth = Math.min(40, Math.max(4, e.props.bodyColumns - 8))
+      rows.push(
+        <Box key="usage-context" flexDirection="column">
+          {heading(
+            'usage-context-h',
+            `${t('usage.context')} · ${Math.round(u.context?.percent ?? contextPercent(ctx))} %`,
+            t('usage.context.size', { used: roundTokens(ctx.used), window: roundTokens(ctx.window) }),
+          )}
+          <Box key="usage-bar" flexDirection="row" flexShrink={0}>
+            {barCells(painted, barWidth)
+              .filter(seg => seg.cells > 0)
+              .map(seg => (
+                <Text key={`seg-${seg.name}`} {...(seg.color === undefined ? { dimColor: true } : { color: seg.color })}>
+                  {TRACK.repeat(seg.cells)}
+                </Text>
+              ))}
+          </Box>
+          {painted.map(row =>
+            stat(
+              `legend-${row.name}`,
+              row.name,
+              kilo(row.tokens),
+              row.color === undefined ? {} : { color: row.color },
+            ),
+          )}
+        </Box>,
+      )
+      const groups = [
+        list('usage-skills', t('usage.skills'), ctx.skills),
+        list('usage-mcp', t('usage.mcp'), ctx.mcp, ctx.mcpDeferred > 0 ? t('usage.mcp.deferred', { n: ctx.mcpDeferred }) : undefined),
+        list('usage-memory', t('usage.memory'), ctx.memory),
+        list('usage-agents', t('usage.agents'), ctx.agents),
+      ].filter(one => one !== null)
+      if (groups.length > 0) {
+        rows.push(
+          <Box key="usage-items" flexDirection="column" rowGap="xs">
+            {groups}
+          </Box>,
+        )
+      }
+    }
+
+    // 3. Where it goes: each role (the line moved here from the team tab), the tools whose results weigh most, the costliest turns.
+    if (hasSpend) {
+      const spendRows: RenderChildren[] = [heading('usage-spend-h', t('usage.spend'))]
+      if (spend.parts.length > 0) {
+        spendRows.push(
+          <Box key="team-spend" flexDirection="row" flexWrap="wrap" columnGap={2}>
+            <Text dimColor>{t('spend.label')}</Text>
+            {spend.parts.map(p => (
+              <Text key={`spend-${p.role}`} color={LOOK[p.role].color} dimColor>
+                {p.text}
+              </Text>
+            ))}
+            {spend.share !== '' && <Text dimColor>{spend.share}</Text>}
+          </Box>,
+        )
+      }
+      spendRows.push(list('usage-tools', t('usage.tools'), tools))
+      if (counted.top.length > 0) {
+        spendRows.push(
+          <Box key="usage-turns" flexDirection="column">
+            <Text dimColor>{t('usage.turns')}</Text>
+            {counted.top.map(turn => (
+              <Box key={`turn-${turn.n}`} flexDirection="column">
+                {stat(`turn-${turn.n}-row`, t('usage.turn', { n: turn.n }), `${kilo(turn.tokens)} · ${seconds(turn.ms)}`)}
+                {turn.prompt !== undefined && (
+                  <Box paddingLeft={2}>
+                    <Text dimColor wrap="truncate-end">{turn.prompt}</Text>
+                  </Box>
+                )}
+              </Box>
+            ))}
+          </Box>,
+        )
+      }
+      rows.push(
+        <Box key="usage-spend" flexDirection="column" rowGap="xs">
+          {spendRows}
+        </Box>,
+      )
+    }
+
+    return rows
+  }
+
   // One tab at a time under the drawing: each button names its card and,
   // when there is news there, a short count, so a hidden tab still speaks.
+  const ctxPercent = u.context?.percent ?? (counted.context === undefined ? 0 : contextPercent(counted.context))
   const TAB_LOOK: Record<CardId, { label: string; accent: string; badge: string }> = {
     team: { label: t('tab.team'), accent: BRAND[0], badge: busy > 0 ? `●${busy}` : '' },
     skills: { label: t('tab.skills'), accent: SKILL_COLOR, badge: picked.length + packsPicked > 0 ? `✦${picked.length + packsPicked}` : '' },
     jobs: { label: t('tab.jobs'), accent: BRAND[1], badge: runningJobs.length > 0 ? `⟳${runningJobs.length}` : '' },
     github: { label: t('tab.github'), accent: BRAND[2], badge: ci?.mark ?? '' },
+    // Only a context nearly full speaks from a hidden tab.
+    usage: { label: t('tab.usage'), accent: USAGE_COLOR, badge: ctxPercent >= COMPACT_AT ? percentText(ctxPercent) : '' },
   }
   const tabRow = (
     <Box key="tabs" flexDirection="row" flexWrap="wrap" columnGap={1} rowGap="xs">
@@ -1037,7 +1205,10 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
             key={`tab-${id}`}
             {...(id === shown ? { variant: 'primary' as const } : {})}
             label={look.badge === '' ? look.label : `${look.label} ${look.badge}`}
-            onPress={() => void showTab($, id)}
+            onPress={() =>
+              // The breakdown is read again when the usage tab opens, never on the ticker.
+              void showTab($, id).then(() => (id === 'usage' ? quietly(refreshContext($)) : undefined))
+            }
           />
         )
       })}
@@ -1048,6 +1219,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
     skills: { title: t('card.skills'), plate: t('plate.skills'), body: skillsBody },
     jobs: { title: t('card.jobs'), plate: t('plate.jobs'), body: jobsBody },
     github: { title: t('card.github'), plate: t('plate.github'), body: githubBody },
+    usage: { title: t('card.usage'), plate: t('plate.usage'), body: usageBody },
   }
   const showing = BODIES[shown]
   const cards = (

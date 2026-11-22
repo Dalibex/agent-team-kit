@@ -44,14 +44,13 @@ What you see:
   ends, for when you are in another window. When an API failure ends a
   turn, Claude's row says which ("la API cortó el turno: servidores
   saturados") until the next turn starts.
-- Then a row of tabs, one card shown at a time: Equipo, Skills, Procesos
-  and GitHub. A hidden tab's button carries a short count of its news
+- Then a row of tabs, one card shown at a time: Equipo, Skills, Procesos,
+  GitHub and Uso. A hidden tab's button carries a short count of its news
   (`Equipo ●2`, `Skills ✦3`, `Procesos ⟳1`, `GitHub ✗`), and the tab shown
   is kept in the store, so the next session opens on it. The card is titled
   like the drawing (its name in neon pixel letters) and framed in its colour.
-  - **Equipo**: one line per member: Claude, then what each role used
-    this session in fresh tokens and the team's share, then the recent
-    agents, the whole history of 16. A working one reads "working…" with
+  - **Equipo**: one line per member: Claude, then the recent agents, the
+    whole history of 16. A working one reads "working…" with
     a spinner and moving dots; a finished one shows its task in one line;
     then its time and model, and under it, in skill colour, the skills it
     loaded with the Skill tool (Claude's for its current or last turn, an
@@ -109,10 +108,20 @@ What you see:
     review, or its last workflow run; how many PRs wait for your review;
     and the last thing Claude did with git. git is read locally when the
     session starts, after a turn and after git commands; `gh` is asked when
-    the session starts, after a push, a PR or a branch change, every two
-    minutes only while CI is running, and with the button. It needs `gh`
-    installed and signed in; without it the card still shows the local git
-    state.
+    the session starts, after a push, a PR or a branch change, while CI is
+    running (every two minutes, slowing to ten while nothing changes, and
+    stopping after an hour, six while a check is really in progress), and
+    with the button. It needs `gh` installed and signed in; without it the
+    card still shows the local git state.
+  - **Uso**: where the session's tokens go, in tokens only. The session's
+    input, output, the share read from cache, turns and compactions; the
+    context window now, as a bar by category and the top items under it
+    (skills grouped by plugin, MCP tools by server, each memory file, each
+    custom agent); then Claude against each role in fresh tokens and the
+    team's share, the tools whose results added the most tokens, and the
+    three turns with the most tokens. It reads the engine's own estimates
+    (`/context`'s summary, never the token-count API), calls no model, and
+    refreshes when the tab opens and after Claude's turns while it is shown.
 
 The team: the four agents ship in `agents/` (`agent-team:explorer`,
 `agent-team:implementer`, `agent-team:tester`, `agent-team:reviewer`), each
