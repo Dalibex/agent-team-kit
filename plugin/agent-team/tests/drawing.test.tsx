@@ -104,8 +104,8 @@ test('after a quiet minute the sprites hold a still pose, and move again when so
   expect(svg).not.toContain('type="scale"')
   expect(svg).not.toContain('attributeName="height"')
   expect(svg).not.toContain('>z<animate ')
-  // only the title's two twinkles still move
-  expect(animations(svg)).toBe(2)
+  // nothing moves at rest: the title has no twinkling stars since 0.9.1
+  expect(animations(svg)).toBe(0)
 
   const woken: Team = { ...resting, main: { ...resting.main, status: 'working' } }
   expect(isStill(woken, AT)).toBe(false)

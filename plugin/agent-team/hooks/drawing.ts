@@ -3,7 +3,7 @@
 import type { AgentRow, AgentStatus, Role, Team, Usage } from '../types'
 import { t } from './i18n'
 import { levelOf, percentText, projectionOf, resetClock, roundTokens, windowName } from './usage'
-import { ASLEEP, BRAND, branding, CARD, CONTEXT_COLOR, esc, INK, LEVEL_COLOR, LOOK, neonTint, neonWord, nameOf, pixelWord, starfield, statusText, twinkle, WARN, wordWidth } from './look'
+import { ASLEEP, BRAND, branding, CARD, CONTEXT_COLOR, esc, INK, LEVEL_COLOR, LOOK, neonTint, neonWord, nameOf, pixelWord, starfield, statusText, WARN, wordWidth } from './look'
 import { AFTERGLOW_MS, familyOf, isAlive, isOverReading, isShellRunning, isStill, MAIN_END_MS, PULSE_MS } from './state'
 
 // ---------------------------------------------------------------- sprites
@@ -576,10 +576,6 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     const lx = leadX - leadW / 2 - 22 - wordWidth(left, p)
     const rx = leadX + leadW / 2 + 22
     out.push(neonWord(left, lx, ty, p), neonWord(right, rx, mid - 3.5 * pr, pr))
-    out.push(
-      twinkle(rx + wordWidth(right, pr) + 12, mid - 3.5 * pr - 2, 6, '#ffd166', 2.4, 0),
-      twinkle(lx - 10, ty + 7 * p + 4, 4, BRAND[3], 3.1, 1.2),
-    )
     if (branding.isCustom) {
       out.push(
         `<text x="${lx + wordWidth(left, p)}" y="${ty + 7 * p + 16}" text-anchor="end" font-size="10" letter-spacing="2" fill="#8f8bb0">AGENT SQUAD</text>`,

@@ -23,6 +23,7 @@ All notable changes to agent-team-kit. The format follows
 - Once an agent's afterglow ends, its slot rests like an empty one instead of
   staying green; a failed one keeps a dim red border until the role runs
   again.
+- The team name in the drawing no longer has twinkling stars beside it.
 - The "View its conversation" button shows only on the terminal: the desktop
   app draws its own conversation, so the engine cannot switch it there.
 
