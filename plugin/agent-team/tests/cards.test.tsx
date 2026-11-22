@@ -1,7 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { SessionMeasureInput } from 'claude-code'
+import type { EngineInterface, SessionMeasureInput } from 'claude-code'
 
+import { ciPollMs, NO_GIT, readGit } from '../hooks/github'
 import { boot, drawing, finish, onTab, PANE, SURFACES, shows, spawn, start } from './support'
 import type { World } from './support'
 
@@ -160,11 +161,11 @@ test('a foreground npm install is one line: what it is, its mark and its time', 
   await $.tool.call({ tool: 'Bash', command: 'npm install express zod', description: 'Install the API deps' })
 
   for (const surface of SURFACES) {
-    expect(await shows($, surface, /^npm · instalación$/)).toBe(true)
+    expect(await shows($, surface, /^npm · instalación · express, zod$/)).toBe(true)
     expect(await shows($, surface, /^✓$/)).toBe(true)
     expect(await shows($, surface, /^0s$/)).toBe(true)
     // no command, no description, no output: the main thing only
-    expect(await shows($, surface, /Install the API deps|express|312/)).toBe(false)
+    expect(await shows($, surface, /Install the API deps|312/)).toBe(false)
   }
 })
 
@@ -177,7 +178,7 @@ test('a build whose output says BUILD FAILURE fails, even when it exited 0', asy
   await $.tool.call({ tool: 'Bash', command: './mvnw -q verify' })
 
   for (const surface of SURFACES) {
-    expect(await shows($, surface, /^maven · build$/)).toBe(true)
+    expect(await shows($, surface, /^maven · build · verify$/)).toBe(true)
     expect(await shows($, surface, /^✗$/)).toBe(true)
   }
 })
@@ -198,7 +199,7 @@ test('a build an agent runs gets its row too', async ($, on) => {
   world.toolResult = () => ({ result: { stdout: 'BUILD SUCCESS', stderr: '', interrupted: false } })
   await $.tool.call({ tool: 'Bash', command: 'mvn package', agentId: 'impl-1' })
 
-  expect(await shows($, 'desktop', /^maven · build$/)).toBe(true)
+  expect(await shows($, 'desktop', /^maven · build · package$/)).toBe(true)
   expect(await shows($, 'desktop', /^✓$/)).toBe(true)
 })
 
@@ -223,7 +224,7 @@ test('a background install shows the percentage its output file prints while it 
   await world.clock.advance(2000)
 
   let ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /^pip · instalación$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^pip · instalación · torch$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: SPIN })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^45%$/ })).toBeDefined()
   await ui.unmount()
@@ -288,7 +289,7 @@ test('the GitHub card shows the branch, the PR and its checks', async ($, on) =>
     expect(await shows($, surface, /^CI ●$/)).toBe(true)
     expect(await shows($, surface, /^⎇ feat\/x ↑2$/)).toBe(true)
   }
-  expect(world.gitRuns).toContain('gh pr status --json number,title,url,isDraft,reviewDecision,statusCheckRollup')
+  expect(world.gitRuns).toContain('gh pr status --json number,title,url,isDraft,reviewDecision,statusCheckRollup,state')
 })
 
 /** The address of the Link labelled `label` on the desktop, if it is drawn. */
@@ -499,7 +500,7 @@ test('a foreground job that lost its end is stopped when its turn ends, not left
   }
   const call = $.tool.call({ tool: 'Bash', command: 'npm install left-pad' })
   // the call is not awaited: wait until the hook has registered the job
-  for (let tries = 0; tries < 50 && !(await shows($, 'desktop', /^npm · instalación$/)); tries += 1) {
+  for (let tries = 0; tries < 50 && !(await shows($, 'desktop', /^npm · instalación · left-pad$/)); tries += 1) {
     await world.clock.advance(1)
   }
   expect(await shows($, 'desktop', SPIN)).toBe(true)
@@ -611,4 +612,143 @@ test('resting the pointer on the drawing shows what each gauge means', async ($,
   expect(card).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Las cifras llegan con la primera respuesta del modelo\.$/ })).toBeDefined()
   await ui.unmount()
+})
+
+// ------------------------------------------------------------ v0.8.7: audit
+
+/** The label of the Button keyed `key` on the desktop, if it is drawn. */
+const labelOf = async ($: Engine, key: string): Promise<string | undefined> => {
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const found = await ui.find({ type: 'Button', key })
+  await ui.unmount()
+
+  return found === undefined ? undefined : String(found.props.label)
+}
+
+test('a job row names what the job works on, one line', async ($, on) => {
+  const world = boot(on)
+  await start($)
+  world.toolResult = () => ({ result: { stdout: 'BUILD SUCCESS', stderr: '', interrupted: false } })
+  await $.tool.call({ tool: 'Bash', command: 'mvn -B clean install' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-jobs' })
+  await ui.unmount()
+  const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const row = await again.find({ type: 'Text', text: /^maven · build · clean, install$/ })
+  expect(row?.props.wrap).toBe('truncate-end')
+  await again.unmount()
+})
+
+test('git is asked in English, and a Spanish "not a repository" still reads as outside', async ($, on) => {
+  const world = boot(on)
+  world.gitAnswers['git status'] = {
+    exitCode: 128,
+    stdout: '',
+    stderr: 'fatal: no es un repositorio git (ni ninguno de los directorios superiores): .git',
+  }
+  await start($)
+  await world.clock.advance(1600)
+  expect(await shows($, 'desktop', /^Esta carpeta no es un repositorio git\.$/)).toBe(true)
+  const gitCalls = world.gitRuns.map((run, i) => ({ run, init: world.gitInits[i] })).filter(c => c.run.startsWith('git '))
+  expect(gitCalls.length).toBeGreaterThan(0)
+  for (const call of gitCalls) expect(call.init?.env).toEqual({ LC_ALL: 'C', LANGUAGE: 'C' })
+})
+
+test('a merged PR says merged, shows no live checks and is not polled', async ($, on) => {
+  const world = boot(on)
+  inRepo(world, { ...PR, state: 'MERGED' })
+  await start($)
+  await onTab($, 'github')
+  await world.clock.advance(1600)
+  expect(await shows($, 'desktop', /^fusionada$/)).toBe(true)
+  expect(await shows($, 'desktop', /^● 1$/)).toBe(false)
+  expect(await shows($, 'desktop', /^CI /)).toBe(false)
+  const asked = () => world.gitRuns.filter(run => run.startsWith('gh pr')).length
+  await world.clock.advance(11 * 60_000)
+  expect(asked()).toBe(1)
+})
+
+test('a closed PR says closed', async ($, on) => {
+  const world = boot(on)
+  inRepo(world, { ...PR, state: 'CLOSED' })
+  await start($)
+  await onTab($, 'github')
+  await world.clock.advance(1600)
+  expect(await shows($, 'desktop', /^cerrada$/)).toBe(true)
+})
+
+test('with no PR, a failed run of the branch shows in the chip and on the tab', async ($, on) => {
+  const world = boot(on)
+  inRepo(world)
+  world.gitAnswers['gh run'] = {
+    exitCode: 0,
+    stdout: JSON.stringify([
+      { workflowName: 'CI', status: 'completed', conclusion: 'failure', url: 'https://github.com/acme/demo/actions/runs/9' },
+    ]),
+    stderr: '',
+  }
+  await start($)
+  await world.clock.advance(1600)
+  expect(await shows($, 'desktop', /^CI ✗$/)).toBe(true)
+  expect(await labelOf($, 'tab-github')).toBe('GitHub ✗')
+})
+
+test('the GitHub card keeps its refresh button when git fails', async ($, on) => {
+  const world = boot(on)
+  world.gitAnswers['git status'] = { exitCode: 1, stdout: '', stderr: 'fatal: bad object HEAD' }
+  await start($)
+  await onTab($, 'github')
+  await world.clock.advance(1600)
+  expect(await shows($, 'desktop', /^git: fatal: bad object HEAD$/)).toBe(true)
+  expect(await labelOf($, 'git-refresh')).toBe('↻')
+})
+
+test('the time CI last changed stays while its figures stay, and moves when they change', async (_, on) => {
+  const world = boot(on)
+  inRepo(world, PR)
+  // readGit needs only a clock and a process runner: the world's answers stand in for both
+  const engine = {
+    clock: { now: async () => world.clock.now() },
+    process: {
+      run: async (argv: string[]) => ({
+        ...(world.gitAnswers[argv.slice(0, 2).join(' ')] ?? { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository' }),
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      }),
+    },
+  } as never as EngineInterface
+  const first = await readGit(engine, NO_GIT, true)
+  expect(first.ciChangedAt).toBe(first.remoteAt)
+  await world.clock.advance(5 * 60_000)
+  const same = await readGit(engine, first, true)
+  expect(same.remoteAt).toBeGreaterThan(first.remoteAt)
+  expect(same.ciChangedAt).toBe(first.ciChangedAt)
+  inRepo(world, { ...PR, statusCheckRollup: PR.statusCheckRollup.map(check => ({ ...check, status: 'COMPLETED', conclusion: 'FAILURE' })) })
+  const changed = await readGit(engine, same, true)
+  expect(changed.ciChangedAt).toBe(changed.remoteAt)
+})
+
+test('a check that moves from queued to in progress restarts the polling clock', async (_, on) => {
+  const world = boot(on)
+  const engine = {
+    clock: { now: async () => world.clock.now() },
+    process: {
+      run: async (argv: string[]) => ({
+        ...(world.gitAnswers[argv.slice(0, 2).join(' ')] ?? { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository' }),
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      }),
+    },
+  } as never as EngineInterface
+  const withStatus = (status: string) => inRepo(world, { ...PR, statusCheckRollup: [{ name: 'e2e', status, conclusion: '' }] })
+  withStatus('QUEUED')
+  const first = await readGit(engine, NO_GIT, true)
+  await world.clock.advance(50 * 60_000)
+  const still = await readGit(engine, first, true)
+  expect(still.ciChangedAt).toBe(first.ciChangedAt)
+  withStatus('IN_PROGRESS')
+  const moved = await readGit(engine, still, true)
+  expect(moved.ciChangedAt).toBe(moved.remoteAt)
+  expect(ciPollMs(moved)).toBe(2 * 60_000)
 })

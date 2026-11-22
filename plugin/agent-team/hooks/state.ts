@@ -170,6 +170,8 @@ export const withRows = (agents: AgentRow[], rows: AgentRow[]): AgentRow[] => {
       description: r.description,
       prompt: r.prompt === '' ? a.prompt : r.prompt,
       model: r.model ?? a.model,
+      // A spawn's warning survives a row its agent's first event adopted before the spawn's write.
+      warn: a.warn ?? r.warn,
     }
   })
   const all = [...merged, ...fresh.values()]
@@ -182,6 +184,10 @@ export const withRows = (agents: AgentRow[], rows: AgentRow[]): AgentRow[] => {
     return false
   })
 }
+
+/** An end, under `turnId`, of a round whose start this row never heard: it had ended, on its own, after another turn. */
+export const isMissedRound = (row: AgentRow, turnId: string): boolean =>
+  row.status !== 'running' && row.closedByList !== true && row.turnId !== undefined && row.turnId !== turnId
 
 /** Ends a running row once and adds its run to its role's session total. */
 export const closeRow = (
@@ -209,13 +215,37 @@ export const addRun = (totals: Team['totals'], role: Role, tokens: Tokens | unde
 /**
  * Records an agent's own end. A running row closes as usual; a row the
  * engine's list closed first gets the turn's real status, tokens and report,
- * its tokens added to the totals but not a second run.
+ * its tokens added to the totals but not a second run. An ended row that
+ * hears the end of another turn than its last missed that turn's start (the
+ * engine may hold it past its bound): the round counts as a wake-up would,
+ * `tookMs` its length.
  */
-export const endRow = (t: Team, id: string, end: Partial<AgentRow> & { status: AgentStatus; endedAt: number }): Team => {
+export const endRow = (
+  t: Team,
+  id: string,
+  end: Partial<AgentRow> & { status: AgentStatus; endedAt: number },
+  tookMs = 0,
+): Team => {
   const row = t.agents.find(a => a.id === id)
   if (row === undefined) return t
   if (row.status === 'running') return closeRow(t, id, end)
-  if (row.closedByList !== true) return t
+  if (row.closedByList !== true) {
+    if (end.turnId === undefined || !isMissedRound(row, end.turnId)) return t
+    const woken: AgentRow = {
+      ...row,
+      ...end,
+      startedAt: end.endedAt - Math.max(0, tookMs),
+      rounds: TEAM_TYPES.has(row.type) ? (row.rounds ?? 0) + 1 : row.rounds,
+      workedMs: workedOf(row, row.endedAt ?? end.endedAt),
+      spent: plusTokens(row.spent, row.tokens),
+    }
+
+    return {
+      ...t,
+      agents: t.agents.map(a => (a === row ? woken : a)),
+      totals: addRun(t.totals, row.role, end.tokens),
+    }
+  }
   const filled: AgentRow = { ...row, ...end, endedAt: row.endedAt, closedByList: undefined }
 
   return {
@@ -238,11 +268,14 @@ export const withShell = (shells: ShellTask[], shell: ShellTask): ShellTask[] =>
   })
 }
 
+/** A shell's last sign of life: its output growing, else its start. */
+const newsOf = (s: ShellTask): number => Math.max(s.startedAt, s.lastNewsAt ?? s.startedAt)
+
 export const isShellRunning = (s: ShellTask, at: number): boolean =>
-  s.endedAt === undefined && at - s.startedAt < SHELL_MS
+  s.endedAt === undefined && at - newsOf(s) < SHELL_MS
 
 export const isShellShown = (s: ShellTask, at: number): boolean =>
-  s.endedAt === undefined ? at - s.startedAt < SHELL_MS : at - s.endedAt < SHELL_DONE_MS
+  s.endedAt === undefined ? at - newsOf(s) < SHELL_MS : at - s.endedAt < SHELL_DONE_MS
 
 export type ApiUsage = {
   input_tokens: number
@@ -379,9 +412,29 @@ export const detailOf = (e: { tool: string } & Record<string, unknown>): string 
   }
 }
 
+/** A file path as the read count compares it: forward slashes, lower case. */
+const pathKey = (path: string): string => path.replace(/\\/g, '/').toLowerCase()
+
 /** The file a Read call opens, or undefined for any other call. */
 export const readPathOf = (e: { tool: string } & Record<string, unknown>): string | undefined =>
-  e.tool === 'Read' && typeof e.file_path === 'string' ? e.file_path.replace(/\\/g, '/').toLowerCase() : undefined
+  e.tool === 'Read' && typeof e.file_path === 'string' ? pathKey(e.file_path) : undefined
+
+/** The file an Edit, MultiEdit, Write or NotebookEdit call changes, or undefined for any other call. */
+export const editPathOf = (e: { tool: string } & Record<string, unknown>): string | undefined => {
+  const path =
+    e.tool === 'NotebookEdit' ? e.notebook_path : e.tool === 'Edit' || e.tool === 'MultiEdit' || e.tool === 'Write' ? e.file_path : undefined
+
+  return typeof path === 'string' ? pathKey(path) : undefined
+}
+
+/** Claude's reads after one more call: reading a file the same turn edits or writes is part of the edit, not exploring. */
+export const withRead = (m: MainLoop, read: string | undefined, edit: string | undefined): Pick<MainLoop, 'reads' | 'edited'> => {
+  const edited = edit === undefined || (m.edited ?? []).includes(edit) ? m.edited : [...(m.edited ?? []), edit]
+  const kept = edit === undefined ? m.reads : m.reads.filter(file => file !== edit)
+  const reads = read === undefined || kept.includes(read) || (edited ?? []).includes(read) ? kept : [...kept, read]
+
+  return edited === undefined ? { reads } : { reads, edited }
+}
 
 /** The clip for how something ended: its role's own, a soft one for a failure, none for a stop. */
 export const soundFor = (role: Role, status: AgentStatus): string | undefined =>
@@ -815,7 +868,8 @@ export const REPEAT_GOAL_LIKENESS = 0.6
 export const REPEAT_LIKENESS = 0.8
 
 /** The template's own words: shared by every brief, they say nothing about the task. */
-const TEMPLATE_WORDS = /\b(goal|why|files|done|when|limits|never|commit|push|objetivo|por|qué)\b/gi
+const TEMPLATE_WORDS =
+  /(?<![\p{L}\p{N}])(goal|why|files|done|when|limits|never|commit|push|objetivo|por|qu[eé]|archivos|hecho|cuando|l[ií]mites)(?![\p{L}\p{N}])/giu
 
 /** A brief's Goal: the text after its heading, up to the next heading or blank line. */
 export const goalOf = (prompt: string): string | undefined => {
@@ -867,6 +921,13 @@ export const shortstatLines = (out: string): number | undefined => {
 
   return total === 0 ? undefined : total
 }
+
+/** A commit range a brief names (`main..HEAD`, `abc1234...def5678`), or a pull request. */
+const COMMIT_RANGE = /(?<![\w./~^-])\w[\w./~^-]*?\.{2,3}[\w~^][\w./~^-]*/
+const PULL_REQUEST = /\bPRs?\b|pull request|\/pull\/\d+/i
+
+/** Whether a reviewer's brief names committed work, which the uncommitted lines do not measure. */
+export const namesCommittedWork = (brief: string): boolean => COMMIT_RANGE.test(brief) || PULL_REQUEST.test(brief)
 
 /** A reviewer sent on a change this small: Opus on what a glance would settle. */
 export const reviewWarning = (lines: number | undefined): string | undefined =>
@@ -934,9 +995,8 @@ const spentSince = (totals: Team['totals'], before: Team['totals']): Team['total
   return out
 }
 
-/** The agent rows of the team's four roles, in the order they started. */
-export const teamRows = (agents: readonly AgentRow[]): AgentRow[] =>
-  agents.filter(a => a.role === 'explorer' || a.role === 'implementer' || a.role === 'tester' || a.role === 'reviewer')
+/** The rows of the team's own agents (TEAM_TYPES), in the order they started: an `Explore` or a project's own `tester` is not one. */
+export const teamRows = (agents: readonly AgentRow[]): AgentRow[] => agents.filter(a => TEAM_TYPES.has(a.type))
 
 const pad2 = (n: number): string => String(n).padStart(2, '0')
 
@@ -945,6 +1005,18 @@ const stampOf = (at: number): string => {
   const d = new Date(at)
 
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/**
+ * The name of one session's file in the session log, without its `.md`:
+ * `2026-11-20-1405-1a2b3c4d`, the time in the machine's own and the start of
+ * the session id (its letters and digits), so the files sort by time.
+ */
+export const runsFileName = (at: number, sessionId: string): string => {
+  const d = new Date(at)
+  const short = sessionId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)
+
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}-${short === '' ? 'session' : short}`
 }
 
 /**

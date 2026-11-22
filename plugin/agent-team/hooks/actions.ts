@@ -2,7 +2,7 @@
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, SessionMeasureInput, UiPressArgument } from 'claude-code'
-import type { AgentRow, ForegroundJob, Pack, Role, ShellTask, SkillView, Trail } from '../types'
+import type { AgentRow, ForegroundJob, Pack, Role, ShellTask, SkillView, Team, Trail } from '../types'
 import { ciFinished, opsOf, readGit } from './github'
 import { classify, progressOf } from './jobs'
 import { extendTrail, newWarnings, pruneWarned, resetText, trailFrom, usageOf, windowName } from './usage'
@@ -11,7 +11,7 @@ import { planInstall, planRemove } from './rules'
 import type { UpdateRecord } from './update'
 import { isNewer, manifestVersion, recordFrom, releaseFrom, RELEASE_URL, UPDATE_KEY, UPDATE_MS } from './update'
 import { branding, FAIL_SOUND, LOOK, seconds } from './look'
-import { ARMED_KEY, armedBookFrom, CHIME_GAP_MS, cleanPackName, DELEGATION_KEY, PACK_NAME_MAX, packsFrom, projectKeyOf, reviewWarning, shortstatLines, closeRow, COMMAND, EMPTY, FIRST_TAB, GIT_SHAPE, isShellRunning, jobEndOf, LONG_MS, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_PICKER, NO_SLOTS, NO_UPDATE, PACK_SIZE, packDeleteAsk, PACKS_KEY, PACKS_VIEW, roleOf, shellOf, shellSound, SKILLS_EDIT, SLOTS_KEY, STALE_MS, statusOfListed, stoppedIdOf, TAB_KEY, TAIL_MAX_BYTES, TEAM_SHAPE, titleOf, TOUCHES_GIT, TRAIL_KEY, USAGE_SHAPE, WARNED_KEY, withArmed, withJob, withRows, withShell } from './state'
+import { ARMED_KEY, armedBookFrom, runsFileName, CHIME_GAP_MS, cleanPackName, DELEGATION_KEY, PACK_NAME_MAX, packsFrom, projectKeyOf, reviewWarning, shortstatLines, closeRow, COMMAND, EMPTY, FIRST_TAB, GIT_SHAPE, isShellRunning, jobEndOf, LONG_MS, namesCommittedWork, needsTail, NO_CHOICES, NO_IDS, NO_PACKS, NO_PICKER, NO_SLOTS, NO_UPDATE, PACK_SIZE, packDeleteAsk, PACKS_KEY, PACKS_VIEW, roleOf, shellOf, shellSound, SKILLS_EDIT, SLOTS_KEY, slotsFrom, STALE_MS, statusOfListed, stopLeftovers, stoppedIdOf, TAB_KEY, TAIL_MAX_BYTES, TEAM_SHAPE, titleOf, TOUCHES_GIT, TRAIL_KEY, USAGE_SHAPE, WARNED_KEY, withArmed, withJob, withRows, withShell } from './state'
 import type { CardId, GitOperation, Ran, ShellCall } from './state'
 import { NO_USAGE } from './usage'
 import { NO_GIT } from './github'
@@ -90,13 +90,19 @@ export async function playClip($: EngineInterface, clip: string): Promise<void> 
  */
 export async function reconcile($: EngineInterface, listedAt: number): Promise<void> {
   const listed = new Map((await $.agent.list()).map(a => [a.id, a.status]))
+  // A closed row's foreground jobs lost their end with it: left running, they would spin and keep the ticker busy.
+  const close = (acc: Team, id: string, end: Parameters<typeof closeRow>[2]): Team => {
+    const closed = closeRow(acc, id, end)
+
+    return { ...closed, jobs: stopLeftovers(closed.jobs, id, listedAt) }
+  }
   await update($, team, squad =>
     squad.agents.reduce((acc, row) => {
       if (row.status !== 'running' || row.lastActiveAt >= listedAt) return acc
       const status = listed.get(row.id)
       const ended = status === undefined ? undefined : statusOfListed(status)
       if (ended !== undefined) {
-        return closeRow(acc, row.id, {
+        return close(acc, row.id, {
           status: ended,
           endedAt: listedAt,
           endNote: t('end.listed'),
@@ -104,7 +110,7 @@ export async function reconcile($: EngineInterface, listedAt: number): Promise<v
         })
       }
       if (status === undefined && listedAt - row.lastActiveAt > STALE_MS) {
-        return closeRow(acc, row.id, {
+        return close(acc, row.id, {
           status: 'stopped',
           endedAt: listedAt,
           endNote: t('end.quiet', { time: seconds(listedAt - row.lastActiveAt) }),
@@ -119,10 +125,14 @@ export async function reconcile($: EngineInterface, listedAt: number): Promise<v
   await refreshStatus($)
 }
 
-/** Closes the shell a task notification is about, by the ids it carries. */
+/**
+ * Closes the shell a task notification is about, by the ids it carries; with
+ * `command` (TaskStop's answer names it), the one shell without a task id
+ * running it when no id matches. Any shell not ended counts, however old.
+ */
 export async function closeShell(
   $: EngineInterface,
-  task: { id?: string; toolUseId?: string; status?: string },
+  task: { id?: string; toolUseId?: string; status?: string; command?: string },
   how: string,
 ): Promise<ShellTask | undefined> {
   const at = await $.clock.now()
@@ -131,10 +141,14 @@ export async function closeShell(
   await update($, team, t => {
     hit = undefined
     if (key !== '' && t.seen.includes(key)) return t
-    const running = t.shells.filter(sh => isShellRunning(sh, at))
+    const running = t.shells.filter(sh => sh.endedAt === undefined)
+    const squash = (v: string): string => v.replace(/\s+/g, ' ').trim()
+    const command = task.command === undefined ? '' : squash(task.command)
+    const byCommand = command === '' ? [] : running.filter(sh => sh.taskId === undefined && squash(sh.command) === command)
     const found =
       running.find(sh => task.toolUseId !== undefined && sh.id === task.toolUseId) ??
-      running.find(sh => task.id !== undefined && (sh.taskId === task.id || sh.id === task.id))
+      running.find(sh => task.id !== undefined && (sh.taskId === task.id || sh.id === task.id)) ??
+      (byCommand.length === 1 ? byCommand[0] : undefined)
     if (found === undefined) return t
     const closed: ShellTask = {
       ...found,
@@ -168,7 +182,13 @@ export async function onTaskStop(
 ): Promise<void> {
   const id = stoppedIdOf(asked, ran)
   if (id === undefined) return
-  const closed = await closeShell($, { id, status: 'killed' }, 'stopped with TaskStop')
+  // A shell whose task id was never read is found by the command the answer names.
+  const command = (ran.result as { command?: unknown } | undefined)?.command
+  const closed = await closeShell(
+    $,
+    { id, status: 'killed', ...(typeof command === 'string' ? { command } : {}) },
+    'stopped with TaskStop',
+  )
   if (closed !== undefined) await quietly(refreshStatus($))
 }
 
@@ -197,9 +217,11 @@ export async function onNoticeText(
     // the turn it wakes: handle it once.
     if (t.seen.includes(key)) return t
     const inLoop = (sh: ShellTask): boolean => (sh.owner?.id ?? undefined) === loop
+    // The guesses (by quoted text, as the only one running) count running shells alone; a match by
+    // id reaches any shell not ended, however old: one past SHELL_MS may still run, and its end is news.
     const running = t.shells.filter(sh => isShellRunning(sh, at) && inLoop(sh))
     const byId = t.shells
-      .filter(sh => isShellRunning(sh, at))
+      .filter(sh => sh.endedAt === undefined)
       .find(sh => id !== undefined && (sh.taskId === id || sh.id === id))
     const idIsKnown = id !== undefined && t.shells.some(sh => sh.taskId === id || sh.id === id)
     // By text only when exactly one running shell is quoted: two Maven calls
@@ -378,11 +400,40 @@ export async function followProject($: EngineInterface): Promise<void> {
   await loadProject($, folder)
 }
 
-/** Puts a skill in a slot, or empties it; the store keeps it for every session and project. */
-export async function setSlot($: EngineInterface, index: number, name: string | null): Promise<void> {
-  await update($, slots, list => list.map((one, i) => (i === index ? name : one)))
+/** One slot changed in a list: a skill another slot already holds does not go in twice, and only a list's first copy of a skill stays. */
+const withSlot = (list: readonly (string | null)[], index: number, name: string | null): (string | null)[] => {
+  const isElsewhere = name !== null && list.some((one, i) => one === name && i !== index)
+  const changed = isElsewhere ? [...list] : list.map((one, i) => (i === index ? name : one))
+
+  return changed.map((one, i) => (one !== null && changed.indexOf(one) !== i ? null : one))
+}
+
+// The slot changes of this window, one at a time: each reads the store after the last one wrote it.
+// A module variable: a reload starts it over, harmlessly.
+let slotQueue: Promise<void> = Promise.resolve()
+
+/**
+ * Puts a skill in a slot, or empties it; the store keeps it for every session
+ * and project. The change applies over what the store holds now, so a slot
+ * another window filled meanwhile is kept, and changes made in this window
+ * meanwhile wait their turn; a store that cannot be read keeps the change in
+ * this session alone. A skill another slot holds does not go in a second one.
+ */
+export function setSlot($: EngineInterface, index: number, name: string | null): Promise<void> {
+  const done = slotQueue.then(() => changeSlot($, index, name))
+  slotQueue = done.catch(() => undefined)
+
+  return done
+}
+
+async function changeSlot($: EngineInterface, index: number, name: string | null): Promise<void> {
+  const stored = await $.store.get(SLOTS_KEY).then(
+    value => ({ isRead: true, list: value === undefined ? undefined : slotsFrom(value) }),
+    () => ({ isRead: false, list: undefined }),
+  )
+  await update($, slots, list => withSlot(stored.list ?? list, index, name))
   const held = await read($, slots)
-  await quietly($.store.set(SLOTS_KEY, held))
+  if (stored.isRead) await quietly($.store.set(SLOTS_KEY, held))
   // A skill no slot holds any more is no longer picked.
   const before = await read($, armed)
   if (before.some(one => !held.includes(one))) {
@@ -491,11 +542,14 @@ export async function deletePack($: EngineInterface, id: string): Promise<void> 
 /**
  * Marks a reviewer's row when the change it was sent on is small: the lines
  * `git diff --shortstat HEAD` counts, staged and not. Outside a repository, or
- * when git does not answer, nothing is said.
+ * when git does not answer, nothing is said; nor when the work may be
+ * committed (the branch is ahead, or the brief names a commit range or a PR),
+ * which the uncommitted lines do not measure.
  */
-export async function checkReviewSize($: EngineInterface, id: string, spawnCwd?: string): Promise<void> {
+export async function checkReviewSize($: EngineInterface, id: string, spawnCwd?: string, brief = ''): Promise<void> {
   const g = await read($, git)
   if (g.state !== 'ok') return
+  if (g.ahead > 0 || namesCommittedWork(brief)) return
   // A reviewer working in another folder reviews a tree git was not read in.
   if (spawnCwd !== undefined && projectKeyOf(spawnCwd) !== (await read($, project))) return
   // New files the diff does not count may be most of the change: then the size says nothing.
@@ -711,18 +765,23 @@ export const tailSizes = new Map<string, number>()
 
 /**
  * Reads the output files of running background shells for the last
- * percentage they printed. A file that did not grow, or is too big to copy
- * every two seconds, is left alone.
+ * percentage they printed. A file that grew is news: its shell still runs.
+ * A file that did not grow, or is too big to copy every two seconds, is not read.
  */
 export async function readTails($: EngineInterface): Promise<void> {
   const t = await read($, team)
   const at = await $.clock.now()
   const found = new Map<string, number | undefined>()
+  const grew = new Set<string>()
   for (const sh of t.shells.filter(one => needsTail(one, at))) {
     try {
       const stat = await $.fs.stat(sh.outputPath as string)
-      if (stat.size > TAIL_MAX_BYTES || tailSizes.get(sh.id) === stat.size) continue
+      const before = tailSizes.get(sh.id)
+      if (before === stat.size) continue
       tailSizes.set(sh.id, stat.size)
+      // A file first seen (a new shell, or any after a reload) says nothing of when it last grew.
+      if (before !== undefined) grew.add(sh.id)
+      if (stat.size > TAIL_MAX_BYTES) continue
       found.set(sh.id, progressOf(await $.fs.read(sh.outputPath as string)))
     } catch {
       // not written yet, or gone: the next tick tries again while it runs
@@ -730,14 +789,14 @@ export async function readTails($: EngineInterface): Promise<void> {
   }
   // Ended shells are never read again.
   for (const id of tailSizes.keys()) if (!t.shells.some(sh => sh.id === id && needsTail(sh, at))) tailSizes.delete(id)
-  if (found.size === 0) return
+  if (grew.size === 0 && found.size === 0) return
   await update($, team, cur => ({
     ...cur,
     shells: cur.shells.map(sh => {
-      if (!found.has(sh.id)) return sh
+      if ((!grew.has(sh.id) && !found.has(sh.id)) || sh.endedAt !== undefined) return sh
       const progress = found.get(sh.id)
 
-      return progress === undefined ? sh : { ...sh, progress }
+      return { ...sh, ...(grew.has(sh.id) ? { lastNewsAt: at } : {}), ...(progress === undefined ? {} : { progress }) }
     }),
   }))
 }
@@ -828,17 +887,20 @@ export async function takeUsage($: EngineInterface, figures: Pick<SessionMeasure
 
 /**
  * The Claude config folder: CLAUDE_CONFIG_DIR, else the home folder with
- * `.claude`. The home is USERPROFILE when it is set (what Node's os.homedir
- * reads first on Windows; POSIX has none), else HOME. Undefined when none is set.
+ * `.claude`. On Windows the home is USERPROFILE when it is set (what Node's
+ * os.homedir reads first there), else HOME; elsewhere HOME first, so WSL, which
+ * may carry the Windows USERPROFILE, writes its own, and USERPROFILE only when
+ * HOME is not set either. Undefined when none is set.
  */
 export async function configDir($: EngineInterface): Promise<string | undefined> {
   const plain = (dir: string): string => dir.replace(/[\\/]+$/, '')
   const config = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined))?.trim()
   if (config !== undefined && config !== '') return plain(config)
-  const profile = (await $.env.get('USERPROFILE').catch(() => undefined))?.trim()
-  const home = (await $.env.get('HOME').catch(() => undefined))?.trim()
-  const base = profile !== undefined && profile !== '' ? profile : home
-  if (base === undefined || base === '') return undefined
+  const isWindows = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT'
+  const profile = (await $.env.get('USERPROFILE').catch(() => undefined))?.trim() ?? ''
+  const home = (await $.env.get('HOME').catch(() => undefined))?.trim() ?? ''
+  const base = (isWindows ? profile : '') || home || profile
+  if (base === '') return undefined
 
   return `${plain(base)}/.claude`
 }
@@ -850,28 +912,56 @@ export async function claudeMdPath($: EngineInterface): Promise<string | undefin
   return dir === undefined ? undefined : `${dir}/CLAUDE.md`
 }
 
-/** Where the session log is, under the config folder. */
-export const RUNS_FILE = 'agent-team/runs.md'
+/** Where the session log is, under the config folder: one file per session. A runs.md from 0.8.6 or before, beside it, is left as it is. */
+export const RUNS_DIR = 'agent-team/runs'
+
+/** What the session end must have left to write the log: with less, nothing is written. */
+export const RUNS_MIN_MS = 400
+
+/** Whether the session end has too little of its budget left to write the log. */
+export const isLateForRuns = (remainingMs: number): boolean => remainingMs < RUNS_MIN_MS
+
+/** Names tried for one session's file: a taken one gets a suffix (`-2`, `-3`...), so the log never writes over a file. */
+const RUNS_NAMES = 20
 
 /**
- * Appends an entry to the session log in the config folder (the file and its
- * folder are made when missing). The engine has no append: the file is read
- * and written whole, so two sessions ending at the same moment can lose one
- * entry (the last write wins), and past the engine's 4 MiB read limit the read
- * fails and the log stops growing. Whatever fails to read is left as it is:
- * nothing is written over a log that could not be read. A symbolic link is
- * written through to what it leads to.
+ * Writes this session's entry to a file of its own in the session log, under
+ * the config folder (its folders are made when missing), and says whether it
+ * did. No other file is read: two windows ending together write two files. A
+ * name already taken gets a suffix; nothing is written over. With less than
+ * RUNS_MIN_MS of the end's budget left (`remainingMs`, asked just before the
+ * write) nothing is written and one line goes to the debug log: the entry is
+ * tried again at a later end of this process (a /clear, a resume), and lost
+ * on a real exit.
  */
-export async function appendRuns($: EngineInterface, entry: string): Promise<void> {
+export async function writeRuns(
+  $: EngineInterface,
+  entry: string,
+  at: number,
+  sessionId: string,
+  remainingMs: () => number = () => Number.POSITIVE_INFINITY,
+): Promise<boolean> {
   const dir = await configDir($)
-  if (dir === undefined || entry === '') return
-  const path = `${dir}/${RUNS_FILE}`
-  const exists = await $.fs.exists(path)
-  const stat = exists ? await $.fs.stat(path, { resolve: true }).catch(() => undefined) : undefined
-  const real = stat?.isLink === true && stat.realPath !== undefined ? stat.realPath : path
-  const before = exists ? await $.fs.read(real) : ''
+  if (dir === undefined || entry === '') return false
+  const base = `${dir}/${RUNS_DIR}/${runsFileName(at, sessionId)}`
+  let path: string | undefined
+  for (let n = 1; n <= RUNS_NAMES && path === undefined; n += 1) {
+    const name = n === 1 ? `${base}.md` : `${base}-${n}.md`
+    if (!(await $.fs.exists(name))) path = name
+  }
+  if (path === undefined) {
+    $.ui.log(`agent-team: ${RUNS_NAMES} session log files named ${base} already exist; this entry was not written`, { to: 'debug' })
 
-  await $.fs.write(real, `${typeof before === 'string' ? before : ''}${entry}`)
+    return false
+  }
+  if (isLateForRuns(remainingMs())) {
+    $.ui.log(`agent-team: the session end had ${Math.round(remainingMs())} ms left; the session log entry was not written`, { to: 'debug' })
+
+    return false
+  }
+  await $.fs.write(path, entry)
+
+  return true
 }
 
 /** The copies of CLAUDE.md the pane keeps beside it: how they are named and how many stay. */

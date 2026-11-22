@@ -118,12 +118,20 @@ test('rules: CLAUDE_CONFIG_DIR wins over HOME and USERPROFILE', async ($, on) =>
   expect(world.written).toEqual(['/cfg/claude/CLAUDE.md'])
 })
 
-test('rules: USERPROFILE comes before HOME, as os.homedir reads them on Windows; HOME alone does for POSIX', async ($, on) => {
-  const world = boot(on, { env: { USERPROFILE: 'C:\\Users\\ana\\', HOME } })
+test('rules: on Windows USERPROFILE comes before HOME, as os.homedir reads them there', async ($, on) => {
+  const world = boot(on, { env: { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\ana\\', HOME } })
   await start($)
 
   await run($, 'rules')
   expect(world.written).toEqual(['/Users/ana/.claude/CLAUDE.md'])
+})
+
+test('rules: off Windows (WSL) HOME is used even when USERPROFILE is set', async ($, on) => {
+  const world = boot(on, { env: { USERPROFILE: 'C:\\Users\\ana', HOME } })
+  await start($)
+
+  await run($, 'rules')
+  expect(world.written).toEqual([`${HOME}/.claude/CLAUDE.md`])
 })
 
 test('rules: HOME is used when USERPROFILE is not set', async ($, on) => {

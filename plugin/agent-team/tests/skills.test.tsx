@@ -125,9 +125,9 @@ test('edit mode turns filled slots into ✎ buttons that open their picker, and 
   expect(await labelOf($, 'slot-btn-0')).toBe('✎ code-review')
   expect(await labelOf($, 'skills-edit')).toBe('← Volver')
 
-  // a press in edit mode opens the picker instead of picking
-  await press($, 'slot-btn-1', 'skills-group-0', 'skills-choice-0')
-  expect(await labelOf($, 'slot-btn-1')).toBe('✎ code-review')
+  // a press in edit mode opens the picker instead of picking (code-review is held by slot 0, so frontend-design is picked)
+  await press($, 'slot-btn-1', 'skills-group-1', 'skills-choice-0')
+  expect(await labelOf($, 'slot-btn-1')).toBe('✎ frontend-design')
 
   await press($, 'skills-edit')
   expect(await labelOf($, 'slot-btn-0')).toBe('code-review')

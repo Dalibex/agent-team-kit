@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import { checksOf, ciFinished, NO_GIT, parsePrStatus, parseStatus, repoOf } from '../hooks/github'
+import { checksOf, ciFinished, ciPollMs, isCiRunning, NO_GIT, parsePrStatus, parseStatus, repoOf } from '../hooks/github'
 import { setLanguage } from '../hooks/i18n'
-import { classify, looksFailed, outputPathOf, progressOf } from '../hooks/jobs'
+import { classify, jobTitle, looksFailed, outputPathOf, progressOf } from '../hooks/jobs'
 import {
   extendTrail,
   newWarnings,
@@ -274,4 +274,142 @@ test('a reset reads as a wall clock: the time today, the weekday another day', a
   expect(resetClock(new Date(2026, 10, 13, 18, 40).getTime(), at)).toBe('18:40')
   expect(resetClock(new Date(2026, 10, 19, 14, 5).getTime(), at)).toBe('jue 14:05')
   expect(resetClock(undefined, at)).toBeUndefined()
+})
+
+// ------------------------------------------------------------ v0.8.7: audit
+
+test('two workflows with a job of the same name do not hide a failure', async () => {
+  const checks = checksOf([
+    { name: 'build', workflowName: 'CI', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: '2026-01-01T10:00:00Z' },
+    { name: 'build', workflowName: 'Docs', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-01-01T11:00:00Z' },
+  ])
+  expect(checks).toEqual({ ok: 1, failed: 1, pending: 0 })
+})
+
+test('a queued re-run with no start time beats the old failure, whatever the order', async () => {
+  const old = { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: '2026-01-01T10:00:00Z' }
+  const queued = { name: 'test', status: 'QUEUED', conclusion: '', startedAt: '0001-01-01T00:00:00Z' }
+  expect(checksOf([old, queued])).toEqual({ ok: 0, failed: 0, pending: 1 })
+  expect(checksOf([queued, old])).toEqual({ ok: 0, failed: 0, pending: 1 })
+  expect(checksOf([old, { ...queued, startedAt: '' }])).toEqual({ ok: 0, failed: 0, pending: 1 })
+})
+
+test('a required check that was never reported is waiting, not running', async () => {
+  const checks = checksOf([
+    { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { context: 'required/review', state: 'EXPECTED' },
+  ])
+  expect(checks).toEqual({ ok: 1, failed: 0, pending: 1, waiting: 1 })
+  expect(isCiRunning(ok({ ...pr(0, 0), checks }))).toBe(false)
+  expect(isCiRunning(ok(pr(1, 0)))).toBe(true)
+})
+
+test('a merged or closed PR has no CI running', async () => {
+  expect(isCiRunning(ok({ ...pr(1, 0), ended: 'merged' }))).toBe(false)
+  expect(isCiRunning(ok({ ...pr(1, 0), ended: 'closed' }))).toBe(false)
+})
+
+test('polling backs off from two to ten minutes and stops after an hour without change', async () => {
+  const at = 100 * MIN
+  const since = (ago: number) => ({ ...ok(pr(1, 0)), remoteAt: at, ciChangedAt: at - ago })
+  expect(ciPollMs(since(0))).toBe(2 * MIN)
+  expect(ciPollMs(since(9 * MIN))).toBe(2 * MIN)
+  expect(ciPollMs(since(10 * MIN))).toBe(5 * MIN)
+  expect(ciPollMs(since(30 * MIN))).toBe(10 * MIN)
+  expect(ciPollMs(since(60 * MIN))).toBeUndefined()
+  // nothing running: nothing to poll
+  expect(ciPollMs({ ...ok(pr(0, 0)), remoteAt: at, ciChangedAt: at })).toBeUndefined()
+})
+
+test('dev servers and watchers are not tracked as builds', async () => {
+  expect(classify('./mvnw spring-boot:run')).toBeUndefined()
+  expect(classify('mvn quarkus:dev')).toBeUndefined()
+  expect(classify('./gradlew bootRun')).toBeUndefined()
+  expect(classify('docker compose up')).toBeUndefined()
+  expect(classify('docker compose up -d')?.kind).toBe('build')
+  expect(classify('docker compose up --detach db')?.kind).toBe('build')
+  expect(classify('npm run build -- --watch')).toBeUndefined()
+  expect(classify('npm run build -- -w')).toBeUndefined()
+  expect(classify('npm run build -- --continuous')).toBeUndefined()
+  expect(classify('./mvnw clean install')?.kind).toBe('build')
+  expect(classify('./gradlew build')?.kind).toBe('build')
+})
+
+test('a compose subcommand is read in its own place, not from the command it runs', async () => {
+  expect(classify('docker compose exec api sh -c "curl localhost/health/up"')).toBeUndefined()
+  expect(classify('docker compose -f ci.yml build')?.target).toBe('build')
+  expect(classify('docker-compose pull')?.kind).toBe('download')
+})
+
+test('the progress is the one nearest the end, even when the same digits appear earlier', async () => {
+  expect(progressOf('Downloading 5%\n[3/5] Building')).toBe(60)
+  expect(progressOf('[3/5] Building\nDownloading 5%')).toBe(5)
+})
+
+test('a curl that throws its body away is a health check, not a download', async () => {
+  expect(classify('curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health')).toBeUndefined()
+  expect(classify('curl -o NUL http://localhost:8080/health')).toBeUndefined()
+  expect(classify('curl -o $null http://localhost:8080/health')).toBeUndefined()
+  expect(classify('curl -o out.zip https://example.com/kit.zip')?.kind).toBe('download')
+})
+
+test('Windows shims, bun and python -m pytest are tracked', async () => {
+  expect(classify('npm.cmd run build')).toEqual({ kind: 'build', manager: 'npm', target: 'build' })
+  expect(classify('pnpm.cmd install')?.kind).toBe('install')
+  expect(classify('yarn.cmd add zod')?.manager).toBe('yarn')
+  expect(classify('bun install')?.manager).toBe('bun')
+  expect(classify('bun run test')?.kind).toBe('build')
+  expect(classify('npx.cmd expo install expo-camera')?.kind).toBe('install')
+  expect(classify('python3 -m pytest -q')?.manager).toBe('pytest')
+  expect(classify('py -m pytest')?.manager).toBe('pytest')
+})
+
+test('a job row says what the job works on, in one line', async () => {
+  expect(jobTitle({ kind: 'build', manager: 'maven', target: 'clean, install' })).toBe('maven · build · clean, install')
+})
+
+// ------------------------------------------------------------ v0.8.7: audit, round 1
+
+test('a run-once flag is not a watcher', async () => {
+  expect(classify('npm test -- --watchAll=false')?.kind).toBe('build')
+  expect(classify('npm test -- --watch=false')?.kind).toBe('build')
+  expect(classify('npm test -- --watch=0')?.kind).toBe('build')
+  expect(classify('npm test -- --watch=true')).toBeUndefined()
+  expect(classify('npm test -- --watch')).toBeUndefined()
+})
+
+test('compose options with a value or with =value do not hide the subcommand', async () => {
+  expect(classify('docker compose --progress plain build')?.target).toBe('build')
+  expect(classify('docker compose --progress=plain build')?.target).toBe('build')
+  expect(classify('docker compose --progress=plain up -d')?.kind).toBe('build')
+})
+
+test('a row title leaves out a target that only repeats the kind or the rule’s fallback', async () => {
+  const title = (command: string): string => jobTitle(classify(command)!)
+  expect(title('npm run build')).toBe('npm · build')
+  expect(title('mvn')).toBe('maven · build')
+  expect(title('./gradlew')).toBe('gradle · build')
+  expect(title('docker compose build')).toBe('compose · build')
+  expect(title('npm install')).toBe('npm · instalación')
+  expect(title('npm test')).toBe('npm · build · test')
+  expect(title('mvn clean install')).toBe('maven · build · clean, install')
+})
+
+test('PR checks leave a stamp of each check’s status, so queued to in progress is a change', async () => {
+  const out = (status: string) =>
+    JSON.stringify({ currentBranch: { number: 1, title: 't', url: 'u', statusCheckRollup: [{ name: 'ci', status, conclusion: '' }] } })
+  expect(parsePrStatus(out('QUEUED')).pr?.stamp).not.toBe(parsePrStatus(out('IN_PROGRESS')).pr?.stamp)
+  expect(parsePrStatus(out('QUEUED')).pr?.stamp).toBe(parsePrStatus(out('QUEUED')).pr?.stamp)
+})
+
+test('a check really in progress is polled every ten minutes for up to six hours; a queued one stops at one', async () => {
+  const at = 400 * MIN
+  const since = (ago: number, stamp: string) => ({ ...ok({ ...pr(1, 0), stamp }), remoteAt: at, ciChangedAt: at - ago })
+  expect(ciPollMs(since(90 * MIN, 'CI/e2e:IN_PROGRESS:'))).toBe(10 * MIN)
+  expect(ciPollMs(since(5 * 60 * MIN, 'CI/e2e:IN_PROGRESS:'))).toBe(10 * MIN)
+  expect(ciPollMs(since(6 * 60 * MIN, 'CI/e2e:IN_PROGRESS:'))).toBeUndefined()
+  expect(ciPollMs(since(90 * MIN, 'CI/e2e:QUEUED:'))).toBeUndefined()
+  const run = (status: string) => ({ name: 'CI', status, conclusion: '', url: 'r' })
+  expect(ciPollMs({ ...ok(undefined, run('in_progress')), remoteAt: at, ciChangedAt: at - 90 * MIN })).toBe(10 * MIN)
+  expect(ciPollMs({ ...ok(undefined, run('queued')), remoteAt: at, ciChangedAt: at - 90 * MIN })).toBeUndefined()
 })

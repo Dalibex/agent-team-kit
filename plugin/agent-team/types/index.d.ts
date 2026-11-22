@@ -47,6 +47,8 @@ export type AgentRow = {
   workedMs?: number
   /** Tokens used in the rounds before the current one: a wake-up clears `tokens`, this keeps the earlier work. */
   spent?: Tokens
+  /** The engine's id of its current or last turn: an end under another id is a round whose start was missed. */
+  turnId?: string
 }
 
 /** What the session log already holds, so a later entry (after /clear or a resume, the process living on) repeats nothing. */
@@ -91,6 +93,8 @@ export type ShellTask = {
   outputPath?: string
   /** The last percentage its output printed, 0 to 100. */
   progress?: number
+  /** When its output file was last seen to grow: a shell with news is still running, however long ago it started. */
+  lastNewsAt?: number
 }
 
 /** An install, build or download run in the foreground: it ends with the tool call. */
@@ -113,8 +117,10 @@ export type MainLoop = {
   lastDetail?: string
   /** The last tool calls of the current turn, newest last. */
   log: string[]
-  /** The distinct files Claude itself read this turn. */
+  /** The distinct files Claude itself read this turn, the ones it also edited or wrote left out. */
   reads: string[]
+  /** The files Claude edited or wrote this turn: reading one is part of the edit, not exploring. */
+  edited?: string[]
   /** Whether Claude sent the explorer this turn. */
   hasAskedExplorer: boolean
   /** What the last finished turn used. */
@@ -176,6 +182,8 @@ export type Checks = {
   ok: number
   failed: number
   pending: number
+  /** Of the pending ones, those GitHub still waits to hear of (EXPECTED): nothing is running for them. */
+  waiting?: number
   /** The first check that failed, with the page of its log, when GitHub gave one. */
   firstFailure?: { name: string; url: string }
 }
@@ -212,7 +220,13 @@ export type GitInfo = {
     /** APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or '' as gh spells it. */
     review: string
     checks: Checks
+    /** Set when the PR is no longer open: its checks are history, not live. */
+    ended?: 'merged' | 'closed'
+    /** Each check's status and conclusion as one text: it differs when a check moves on, though the counts do not. */
+    stamp?: string
   }
+  /** When the CI figures (checks or run) last changed; the polling backs off from it. */
+  ciChangedAt?: number
   /** The last workflow run on the branch, when it has no pull request. */
   run?: { name: string; status: string; conclusion: string; url: string }
   /** Pull requests that wait for the person's review. */

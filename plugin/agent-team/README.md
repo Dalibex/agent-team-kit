@@ -132,21 +132,24 @@ answer, so a change reaches the next conversation without breaking the
 prompt cache.
 
 Session log: when a session that used at least one team agent ends, the
-`session.end` hook appends an entry to `agent-team/runs.md` in the Claude
+`session.end` hook writes an entry to a file of its own,
+`agent-team/runs/<YYYY-MM-DD>-<HHMM>-<session id start>.md`, in the Claude
 config folder (`CLAUDE_CONFIG_DIR`, else `.claude` under the home folder),
-creating it if missing. The entry has the date, folder and branch, one item
-per team agent (role, model, task, status, time, rounds, tokens, warning) and
-the session's spend. An agent's time and tokens add up all its rounds. The
-pane writes it itself, no model is involved. The `sessionLog` option set to
-`false` writes nothing. Limits: the pane keeps the last 16 agents, so the
+creating the folders if missing. No other file is read, so two sessions
+ending at the same moment write two files, and none is ever written over: a
+name already taken gets a suffix (`-2`, `-3`...). The entry has the date,
+folder and branch, one item per team agent (role, model, task, status, time,
+rounds, tokens, warning) and the session's spend. An agent's time and tokens
+add up all its rounds. The pane writes it itself, no model is involved. The
+`sessionLog` option set to `false` writes nothing. A `runs.md` left by 0.8.6
+or before is left as it is. Limits: the pane keeps the last 16 agents, so the
 oldest agents of a very long session may be missing; after a `/clear` or a
 resume the next entry holds only the agents that ran since the last one, and
 an agent seen again (still running then, or woken since) shows its totals so
-far, while the spend line counts only what is new; the file
-is read and written whole, so two sessions ending at the same moment can lose
-one entry, and past 4 MiB it can no longer be read, so it stops growing (it
-is never overwritten). The file is never trimmed: delete or move it when it
-gets long.
+far, while the spend line counts only what is new; an end with too little of
+its time left (the engine gives the whole end 1.5 s by default) writes nothing, and on a
+real exit that entry is lost. The files are never pruned: delete old ones
+when the folder gets long.
 
 Rounds: a team agent woken again after it ended (a SendMessage continuation)
 counts one round, shown as `↻n` on its row; from 5 on the row warns that
