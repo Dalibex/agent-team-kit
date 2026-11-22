@@ -248,8 +248,8 @@ test('before any turn, and with no breakdown to read, the usage tab says there i
 })
 
 for (const [lang, env, words] of [
-  ['Spanish', undefined, { tokens: 'Tokens', size: 'desglose: 36k de 200k', context: 'Contexto ahora · 18 %', more: '+3 más', free: 'Espacio libre', turn: 'Turno 2', deferred: '1 más sin cargar aún', cache: '70 % leído de la caché' }],
-  ['English', ENGLISH, { tokens: 'Tokens', size: 'breakdown: 36k of 200k', context: 'Context now · 18 %', more: '+3 more', free: 'Free space', turn: 'Turn 2', deferred: '1 more not loaded yet', cache: '70 % read from cache' }],
+  ['Spanish', undefined, { tokens: 'Tokens', size: 'desglose: 36k de 200k', context: 'Contexto ahora · 18%', more: '+3 más', free: 'Espacio libre', turn: 'Turno 2', deferred: '1 más sin cargar aún', cache: '70% leído de la caché' }],
+  ['English', ENGLISH, { tokens: 'Tokens', size: 'breakdown: 36k of 200k', context: 'Context now · 18%', more: '+3 more', free: 'Free space', turn: 'Turn 2', deferred: '1 more not loaded yet', cache: '70% read from cache' }],
 ] as const) {
   for (const surface of SURFACES) {
     test(`the usage tab in ${lang} on ${surface}: session, context, groups and where it goes, with no money`, async ($, on) => {
@@ -369,6 +369,30 @@ test('a user and a project CLAUDE.md that shorten alike say which they are', () 
   expect(view.memory.map(m => m.name)).toEqual(['Project: .claude/CLAUDE.md', 'User: .claude/CLAUDE.md', 'work/AGENTS.md'])
 })
 
+test('two files of the same type that shorten alike take more of their path until they differ', () => {
+  const file = (path: string, type: string, tokens: number) => ({ path, type, tokens })
+  const view = contextOf({
+    ...BREAKDOWN,
+    memoryFiles: [
+      file('C:\\code\\repo\\.claude\\CLAUDE.md', 'Project', 900),
+      file('/code/repo/sub/.claude/CLAUDE.md', 'Project', 500),
+      file('/home/ana/.claude/CLAUDE.md', 'User', 300),
+      file('/a/x/y/CLAUDE.md', 'Local', 20),
+      file('/b/a/x/y/CLAUDE.md', 'Local', 10),
+    ],
+  } as unknown as SessionContextBreakdown)
+  const names = view.memory.map(m => m.name)
+  expect(names).toEqual([
+    'Project: repo/.claude/CLAUDE.md',
+    'Project: sub/.claude/CLAUDE.md',
+    'User: .claude/CLAUDE.md',
+    // one path is the other's end: the shorter is named whole, the longer by one more part
+    'Local: a/x/y/CLAUDE.md',
+    'Local: b/a/x/y/CLAUDE.md',
+  ])
+  expect(new Set(names).size).toBe(names.length)
+})
+
 test('a stored usage tab opens on it, with its breakdown already read', async ($, on) => {
   const world = boot(on, { store: { tab: 'usage' } })
   const asked: string[] = []
@@ -376,7 +400,7 @@ test('a stored usage tab opens on it, with its breakdown already read', async ($
   await start($)
   await world.clock.advance(0)
   expect(asked).toEqual(['summary'])
-  expect(await shows($, 'desktop', /^Contexto ahora · 18 %$/, 'Text', 'usage')).toBe(true)
+  expect(await shows($, 'desktop', /^Contexto ahora · 18%$/, 'Text', 'usage')).toBe(true)
 })
 
 test('a context past 80 % names itself on the tab button, and below that it says nothing', async ($, on) => {

@@ -64,7 +64,7 @@ What you see:
     the same role finished in the last 20 minutes, which SendMessage could
     have continued, or a reviewer sent on a diff of ten lines or fewer
     (`git diff --shortstat HEAD`, read off the spawn's path). At the foot,
-    the Delegate switch (see The team, below).
+    the Delegate switch and the Models block (see The team, below).
   - **Skills**: twelve pack slots, two to a row. An empty one (＋) makes a
     pack and opens it: its name in a text field, saved as it is typed (one
     line, up to 24 characters), and twenty-four skill slots, each filled with the
@@ -139,6 +139,31 @@ advice not to delegate unasked (or appends it, if the engine words it
 otherwise); the Delegate switch stores `delegation` and drops the cached
 answer, so a change reaches the next conversation without breaking the
 prompt cache.
+
+The Models block ("Modelos"), under the Delegate switch, chooses what each
+role runs on: one row per role with its name, a model button (Haiku → Sonnet →
+Opus) and an effort button (low → medium → high → xhigh → max), each press
+moving to the next value; "por defecto" marks a role still on what its agent
+file says (explorer Haiku/low, implementer and tester Sonnet/medium, reviewer
+Opus/high), and "Restablecer", shown once a role was moved, puts all four
+back. A role moved up to Opus, or to an effort of xhigh or max above its
+default, adds a dim line: it uses more of the 5-hour and weekly limits. The
+choice is yours, not a project's: it is kept in the plugin's store
+(`teamModels`) for every project and session, the one copy every open window
+reads and writes (a press applies to what the store holds, so another
+window's choice is kept), and applies from the next spawn, with no restart.
+Only Agent tool calls are covered: a workflow script's `agent()` and a
+plugin's `$.agent.spawn` run on the agent file's settings. A model that takes
+no effort setting may ignore the chosen effort. A `tool.call` hook on the Agent tool
+fills the call's `model` and `effort` from the role's choice when the role
+was moved off its defaults; precedence: what the call names itself wins (Claude
+passing `model: "opus"` for one task, as the team rules allow), then the
+pane's choice, then the agent file. A role on its defaults, other agent types
+and forks are called as Claude wrote them. The agent's row shows the model it
+ran on. The team's paragraph in the Agent tool names each role's chosen model
+(and its effort where that was moved), read from the store when the tool is
+described; on the defaults it is the text earlier versions sent. A change
+drops the cached text, so it reaches the next conversation.
 
 Session log: when a session that used at least one team agent ends, the
 `session.end` hook writes an entry to a file of its own,

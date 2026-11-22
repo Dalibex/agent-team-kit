@@ -1,6 +1,6 @@
 import { mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { AgentInfo, AgentSpawnInput, CommandInfo, HttpInit, HttpResponse, On, ProcessRunInit, ToolCallResult } from 'claude-code'
+import type { AgentInfo, AgentSpawnInput, CommandInfo, EngineInterface, HttpInit, HttpResponse, On, ProcessRunInit, ToolCallResult } from 'claude-code'
 
 export const PANE = {
   plugin: 'agent-team',
@@ -20,7 +20,7 @@ export const PANE = {
 export const SPANISH = { LANG: 'es_ES.UTF-8' } as const
 
 /** The version the mocked manifest (`.claude-plugin/plugin.json`) states: the one "running". */
-export const MANIFEST_VERSION = '0.9.0'
+export const MANIFEST_VERSION = '0.9.1'
 
 /**
  * A path as the tests name it: forward slashes and no drive. The engine hands a
@@ -80,6 +80,8 @@ export type World = {
   onList: (() => Promise<void>) | undefined
   /** Runs inside each spawn, before the engine answers it: an agent's own event that lands before the spawn resolves. */
   onSpawn: (() => Promise<void>) | undefined
+  /** Runs inside each `$.ui.open`, before it answers: what the pane draws as it opens. */
+  onOpen: (($: EngineInterface) => Promise<void>) | undefined
   /** Runs inside each `$.store.get`, the value already read: a store that answers late, with what it held when asked. */
   onStoreGet: ((key: string) => Promise<void> | undefined) | undefined
   /** Each `$.ui.log` text, in order, whatever its sink. */
@@ -163,6 +165,7 @@ export const boot = (
     gitAnswers: {},
     onList: undefined,
     onSpawn: undefined,
+    onOpen: undefined,
     onStoreGet: undefined,
     logs: [],
     clips: [],
@@ -211,8 +214,9 @@ export const boot = (
 
     return { value: { command: 'agent-team' } }
   })
-  on('ui.open', (_, e) => {
+  on('ui.open', async ($, e) => {
     world.opened.push(e.title ?? e.id)
+    await world.onOpen?.($)
 
     return { value: { isPlaced: true } }
   })

@@ -3,7 +3,7 @@
 import type { AgentRow, AgentStatus, Role, Team, Usage } from '../types'
 import { t } from './i18n'
 import { levelOf, percentText, projectionOf, resetClock, roundTokens, windowName } from './usage'
-import { ASLEEP, BRAND, branding, CARD, CONTEXT_COLOR, esc, INK, LEVEL_COLOR, LOOK, neonTint, neonWord, nameOf, pixelWord, starfield, statusText, twinkle, WARN, wordWidth } from './look'
+import { ASLEEP, BRAND, branding, CARD, CONTEXT_COLOR, esc, INK, LEVEL_COLOR, LOOK, neonTint, neonWord, nameOf, pixelWord, starfield, statusText, WARN, wordWidth } from './look'
 import { AFTERGLOW_MS, familyOf, isAlive, isOverReading, isShellRunning, isStill, MAIN_END_MS, PULSE_MS } from './state'
 
 // ---------------------------------------------------------------- sprites
@@ -576,10 +576,6 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     const lx = leadX - leadW / 2 - 22 - wordWidth(left, p)
     const rx = leadX + leadW / 2 + 22
     out.push(neonWord(left, lx, ty, p), neonWord(right, rx, mid - 3.5 * pr, pr))
-    out.push(
-      twinkle(rx + wordWidth(right, pr) + 12, mid - 3.5 * pr - 2, 6, '#ffd166', 2.4, 0),
-      twinkle(lx - 10, ty + 7 * p + 4, 4, BRAND[3], 3.1, 1.2),
-    )
     if (branding.isCustom) {
       out.push(
         `<text x="${lx + wordWidth(left, p)}" y="${ty + 7 * p + 16}" text-anchor="end" font-size="10" letter-spacing="2" fill="#8f8bb0">AGENT SQUAD</text>`,
@@ -642,16 +638,24 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     const color = LOOK[slot.role].color
     out.push(wire(leadX, leadTop + leadH, cx, slotTop, color, isRunning, pulseOf(a, at)))
 
+    // Past its afterglow an ended agent sleeps: a done or stopped slot rests like an empty one, a failed one
+    // keeps a dimmed red until the role runs again. The ticker redraws once as the afterglow ends (isAlive).
+    const isSettled = a !== undefined && !isRunning && !isGlowing
     const border =
       a === undefined
         ? '#2e2a3a'
         : a.status === 'running'
           ? color
           : a.status === 'failed'
-            ? '#d9534f'
-            : a.status === 'stopped'
-              ? '#5d5a6b'
-              : '#3d6b3d'
+            ? isSettled
+              ? FAILED_RESTING
+              : '#d9534f'
+            : isSettled
+              ? '#2e2a3a'
+              : a.status === 'stopped'
+                ? '#5d5a6b'
+                : '#3d6b3d'
+    const barStatus = isSettled && a?.status !== 'failed' ? undefined : a?.status
     const mood: Mood = isRunning ? 'busy' : isGlowing && a?.status !== 'stopped' ? 'awake' : 'asleep'
     const left = cx - boxW / 2
     const tip = a === undefined ? t('slot.idle', { name: nameOf(slot.role) }) : `${nameOf(slot.role)}: ${a.description} (${statusText(a.status)})`
@@ -682,12 +686,15 @@ export const drawTeam = (squad: Team, at: number, u: Usage): string => {
     if (slot.running > 1) {
       out.push(`<text x="${left + boxW - 9}" y="${slotTop + 16}" text-anchor="end" font-size="12" font-weight="bold" fill="${color}">×${slot.running}</text>`)
     }
-    out.push(heartbeat(left + 14, slotTop + boxH - 16, boxW - 28, color, a?.status, a?.calls ?? 0), '</g>')
+    out.push(heartbeat(left + 14, slotTop + boxH - 16, boxW - 28, color, barStatus, a?.calls ?? 0), '</g>')
   })
   out.push(usageColumn(gaugesOf(u, at), TW, H, isLive), '</svg>')
 
   return out.join('')
 }
+
+/** A failed slot's border once its afterglow is over: still red, dimmed, so the failure stays noticed. */
+export const FAILED_RESTING = '#7a3434'
 
 /** The bar under a sprite: sweeping while it works, full and coloured once it ended. */
 export const heartbeat = (x: number, y: number, w: number, color: string, status: AgentStatus | undefined, calls: number): string => {

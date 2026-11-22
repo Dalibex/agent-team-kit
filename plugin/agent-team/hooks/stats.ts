@@ -127,13 +127,25 @@ export const shortPath = (path: string): string => path.replace(/\\/g, '/').spli
 
 const biggest = (items: StatItem[]): StatItem[] => items.slice(0, KEPT_ITEMS)
 
-/** Memory files by short path; two that shorten alike (a user's and a project's CLAUDE.md) say which they are. */
+/**
+ * Memory files by short path; two that shorten alike (a user's and a project's
+ * CLAUDE.md) say which they are, and two of the same type take more of their
+ * path until they differ (`repo/.claude/CLAUDE.md`, `sub/.claude/CLAUDE.md`).
+ */
 const memoryItems = (files: readonly { path: string; type: string; tokens: number }[]): StatItem[] => {
-  const shorts = files.map(f => shortPath(f.path))
+  const parts = files.map(f => f.path.replace(/\\/g, '/').split('/').filter(part => part !== ''))
+  const tail = (i: number, n: number): string => (parts[i] ?? []).slice(-n).join('/')
+  const clashes = (i: number, n: number, isSameType: boolean): boolean =>
+    files.some((g, j) => j !== i && tail(j, n) === tail(i, n) && (!isSameType || g.type === files[i]?.type))
+  const nameOf = (f: { type: string }, i: number): string => {
+    if (!clashes(i, 2, false)) return tail(i, 2)
+    let n = 2
+    while (n < (parts[i]?.length ?? 0) && clashes(i, n, true)) n += 1
 
-  return files
-    .map((f, i) => ({ name: shorts.filter(s => s === shorts[i]).length > 1 ? `${f.type}: ${shorts[i]}` : (shorts[i] ?? ''), tokens: f.tokens }))
-    .sort((a, b) => b.tokens - a.tokens)
+    return `${f.type}: ${tail(i, n)}`
+  }
+
+  return files.map((f, i) => ({ name: nameOf(f, i), tokens: f.tokens })).sort((a, b) => b.tokens - a.tokens)
 }
 
 /** The engine's summary breakdown, grouped and trimmed to what the tab draws. */

@@ -18,7 +18,7 @@ const en = {
   'tokens.turns.other': '{n} turns',
   'spend.label': 'Session',
   'spend.line': 'Session: {all}',
-  'spend.share': 'team {percent} %',
+  'spend.share': 'team {percent}',
 
   // time, windows and limits
   'day.0': 'Sun',
@@ -206,7 +206,7 @@ const en = {
   'usage.none': 'Nothing counted yet: the figures arrive with the first turn.',
   'usage.tokens': 'Tokens',
   'usage.tokens.line': '{input} in · {output} out',
-  'usage.cache': '{percent} % read from cache',
+  'usage.cache': '{percent} read from cache',
   'usage.compactions.one': '{n} compaction',
   'usage.compactions.other': '{n} compactions',
   'usage.context': 'Context now',
@@ -245,6 +245,13 @@ const en = {
   'delegate.off': 'Delegate: no',
   'delegate.hintOn': 'per your rules; a change applies from the next conversation',
   'delegate.hintOff': 'only when you ask; a change applies from the next conversation',
+  'models.title': 'Models',
+  'models.hint': 'a change applies from the next agent; a model Claude names for one task wins',
+  'models.default': 'default',
+  'models.modelOf': '{role} model: {value}',
+  'models.effortOf': '{role} effort: {value}',
+  'models.reset': 'Reset',
+  'models.costly': 'Opus, xhigh and max use more of the 5-hour and weekly limits',
 
   // the skills card
   'back': '← Back',
@@ -324,7 +331,7 @@ const es: Record<Key, string> = {
   'tokens.turns.other': '{n} turnos',
   'spend.label': 'Sesión',
   'spend.line': 'Sesión: {all}',
-  'spend.share': 'equipo {percent} %',
+  'spend.share': 'equipo {percent}',
 
   'day.0': 'dom',
   'day.1': 'lun',
@@ -504,7 +511,7 @@ const es: Record<Key, string> = {
   'usage.none': 'Aún no hay nada contado: las cifras llegan con el primer turno.',
   'usage.tokens': 'Tokens',
   'usage.tokens.line': '{input} entrada · {output} salida',
-  'usage.cache': '{percent} % leído de la caché',
+  'usage.cache': '{percent} leído de la caché',
   'usage.compactions.one': '{n} compactación',
   'usage.compactions.other': '{n} compactaciones',
   'usage.context': 'Contexto ahora',
@@ -542,6 +549,13 @@ const es: Record<Key, string> = {
   'delegate.off': 'Delegar: no',
   'delegate.hintOn': 'según tus reglas; un cambio vale en la próxima conversación',
   'delegate.hintOff': 'solo si se lo pides; un cambio vale en la próxima conversación',
+  'models.title': 'Modelos',
+  'models.hint': 'un cambio vale desde el próximo agente; el modelo que Claude pida para una tarea manda',
+  'models.default': 'por defecto',
+  'models.modelOf': 'modelo de {role}: {value}',
+  'models.effortOf': 'esfuerzo de {role}: {value}',
+  'models.reset': 'Restablecer',
+  'models.costly': 'Opus, xhigh y max gastan más del límite de 5 horas y del semanal',
 
   'back': '← Volver',
   'edit': '✎ Editar',

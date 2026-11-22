@@ -126,7 +126,7 @@ test('the formatter lays out the heading, one item per team agent and the spend'
       '- **implementer (claude-sonnet-5-5): Add paging**',
       '  estado: hecho · tiempo: 1m 5s · rondas: 2 · tokens: 3.0k entrada / 1.0k salida · aviso: brief repeated',
       '',
-      'Sesión: implementer 4.0k ×1 · equipo 100 %',
+      'Sesión: implementer 4.0k ×1 · equipo 100%',
       '',
       '',
     ].join('\n'),

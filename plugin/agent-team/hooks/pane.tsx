@@ -1,15 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, RenderChildren, RenderInput } from 'claude-code'
-import type { SlotPicker, StatItem } from '../types'
+import type { SlotPicker, StatItem, TeamModel } from '../types'
 import { reviewText } from './github'
 import { jobTitle } from './jobs'
 import { t, tn } from './i18n'
 import { kilo, levelOf, percentText, projectionOf, refreshContext, resetClock, roundTokens, windowShort } from './usage'
 import { barCells, cacheShare, contextPercent, inTokens, NO_STATS, STATS_SHAPE, toolItems, topRest } from './stats'
-import { choose, compactNow, copyText, createPack, deletePack, openPicker, pickerBack, pickGroup, quietly, refreshGit, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, togglePack, toggleSkillEdit, turnPage, viewAgent } from './actions'
+import { choose, compactNow, copyText, createPack, cycleEffort, cycleModel, deletePack, openPicker, pickerBack, pickGroup, quietly, refreshGit, resetModels, setPackName, showSkills, showTab, toggleArmed, toggleDelegation, togglePack, toggleSkillEdit, turnPage, viewAgent } from './actions'
 import { drawTeam, gaugesOf, overReadTitle, slotsOf, usageAlt } from './drawing'
 import { BRAND, branding, clockText, titlePlate, COMPACT_AT, CONTEXT_COLOR, DEFAULT_BRANCHES, GIT_COLOR, JOB_MARK, JOB_METER, LEVEL_COLOR, LOOK, meterCols, nameOf, seconds, SKILL_COLOR, SPINNER, STATUS_MARK, statusText, tokenLine, TRACK, USAGE_COLOR, WARN } from './look'
-import { ciMark, EMPTY, familyOf, FIRST_TAB, spendParts, NO_PACKS, PACK_NAME_MAX, packDeleteAsk, PACKS_VIEW, freshOf, GIT_SHAPE, groupLabel, groupOf, isOverReading, jobRowsOf, NO_CHOICES, NO_GROUP, NO_IDS, NO_PICKER, NO_SLOTS, NO_UPDATE, PICK_PAGE, ROUNDS_LIMIT, runMark, sessionTokensOf, SHOWN_ROWS, SKILLS_EDIT, slotLabel, TABS, TEAM_SHAPE, USAGE_SHAPE } from './state'
+import { ciMark, DEFAULT_MODELS, EMPTY, familyOf, isCostlier, isDefaultChoice, TEAM_EFFORTS, TEAM_MODELS, TEAM_ROLES, FIRST_TAB, spendParts, NO_PACKS, PACK_NAME_MAX, packDeleteAsk, PACKS_VIEW, freshOf, GIT_SHAPE, groupLabel, groupOf, isOverReading, jobRowsOf, NO_CHOICES, NO_GROUP, NO_IDS, NO_PICKER, NO_SLOTS, NO_UPDATE, PICK_PAGE, ROUNDS_LIMIT, runMark, sessionTokensOf, SHOWN_ROWS, SKILLS_EDIT, slotLabel, TABS, TEAM_SHAPE, USAGE_SHAPE } from './state'
 import type { CardId } from './state'
 import { NO_USAGE } from './usage'
 import { NO_GIT } from './github'
@@ -31,6 +31,16 @@ const choices = atom({ plugin: 'agent-team', key: 'choices' } as const, NO_CHOIC
 const picker = atom({ plugin: 'agent-team', key: 'picker' } as const, NO_PICKER)
 const updateNotice = atom({ plugin: 'agent-team', key: 'update' } as const, NO_UPDATE)
 const stats = atom({ plugin: 'agent-team', key: 'stats' } as const, NO_STATS, { shape: STATS_SHAPE })
+const models = atom({ plugin: 'agent-team', key: 'models' } as const, DEFAULT_MODELS)
+
+/** A model as its button names it. */
+const MODEL_LABEL: Record<TeamModel, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
+/** The width of a role's name in the models block, so its buttons line up: the longest name and a space. */
+const ROLE_COLS = 12
+/** A button's width in the models block: its longest value and the button's own frame, so a value that cycles does not move the row. */
+const BUTTON_FRAME = 4
+const MODEL_COLS = Math.max(...TEAM_MODELS.map(m => MODEL_LABEL[m].length)) + BUTTON_FRAME
+const EFFORT_COLS = Math.max(...TEAM_EFFORTS.map(level => level.length)) + BUTTON_FRAME
 
 /**
  * The pane: the drawing (the team and its usage column), the line under it
@@ -55,6 +65,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
   const packList = await read($, packs)
   const view = await read($, skillView)
   const isDelegating = await read($, delegation)
+  const chosenModels = await read($, models)
   const newer = await read($, updateNotice)
   // The usage tab's figures are read only while it is shown: a hidden one is not redrawn by every tool call.
   const counted = shown === 'usage' ? await read($, stats) : NO_STATS
@@ -371,7 +382,10 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
               )}
               {answer !== '' && open.includes(`report-${a.id}`) && <Text wrap="wrap">{answer}</Text>}
               <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-                <Button key={`view-${a.id}`} label={t('agent.view')} onPress={() => void viewAgent($, a.id)} />
+                {/* Only the terminal draws the main view `$.ui.view` moves; the apps draw their own transcript and deny it. */}
+                {e.surface === 'terminal' && (
+                  <Button key={`view-${a.id}`} label={t('agent.view')} onPress={() => void viewAgent($, a.id)} />
+                )}
                 {answer !== '' && (
                   <Button key={`copy-${a.id}`} label={t('agent.copy')} onPress={press => void copyText($, answer, press)} />
                 )}
@@ -398,6 +412,57 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
             {isDelegating ? t('delegate.hintOn') : t('delegate.hintOff')}
           </Text>
         </Box>
+      </Box>,
+    )
+    // What each team role runs on: two buttons a role, read by the next spawn of its agent.
+    const moved = TEAM_ROLES.filter(role => !isDefaultChoice(role, chosenModels[role]))
+    rows.push(
+      <Box key="models" flexDirection="column">
+        <Text bold>{t('models.title')}</Text>
+        <Text dimColor wrap="wrap">
+          {t('models.hint')}
+        </Text>
+        {TEAM_ROLES.map(role => {
+          const choice = chosenModels[role]
+
+          return (
+            <Box key={`models-${role}`} flexDirection="row" flexWrap="wrap" columnGap={1}>
+              <Box width={ROLE_COLS} flexShrink={0}>
+                <Text color={LOOK[role].color}>{nameOf(role)}</Text>
+              </Box>
+              {/* Each button keeps the width of its longest value, so the row does not shift as it cycles; its label names the control whole. */}
+              <Box width={MODEL_COLS} flexShrink={0}>
+                <Button
+                  key={`model-${role}`}
+                  label={t('models.modelOf', { role: nameOf(role), value: MODEL_LABEL[choice.model] })}
+                  onPress={() => void cycleModel($, role)}
+                >
+                  {MODEL_LABEL[choice.model]}
+                </Button>
+              </Box>
+              <Box width={EFFORT_COLS} flexShrink={0}>
+                <Button
+                  key={`effort-${role}`}
+                  label={t('models.effortOf', { role: nameOf(role), value: choice.effort })}
+                  onPress={() => void cycleEffort($, role)}
+                >
+                  {choice.effort}
+                </Button>
+              </Box>
+              {isDefaultChoice(role, choice) && <Text dimColor>{t('models.default')}</Text>}
+            </Box>
+          )
+        })}
+        {moved.some(role => isCostlier(role, chosenModels[role])) && (
+          <Text dimColor wrap="wrap">
+            {t('models.costly')}
+          </Text>
+        )}
+        {moved.length > 0 && (
+          <Box>
+            <Button key="models-reset" plain dimColor label={t('models.reset')} onPress={() => void resetModels($)} />
+          </Box>
+        )}
       </Box>,
     )
 
@@ -1069,7 +1134,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
           </Text>
           <Text dimColor wrap="wrap">
             {[
-              share === undefined ? '' : t('usage.cache', { percent: share }),
+              share === undefined ? '' : t('usage.cache', { percent: percentText(share) }),
               tn(counted.turns, 'tokens.turns.one', 'tokens.turns.other'),
               counted.compactions > 0 ? tn(counted.compactions, 'usage.compactions.one', 'usage.compactions.other') : '',
             ]
@@ -1103,7 +1168,7 @@ export async function renderPane($: EngineInterface, e: RenderInput<'Pane'>) {
         <Box key="usage-context" flexDirection="column">
           {heading(
             'usage-context-h',
-            `${t('usage.context')} · ${Math.round(u.context?.percent ?? contextPercent(ctx))} %`,
+            `${t('usage.context')} · ${percentText(u.context?.percent ?? contextPercent(ctx))}`,
             t('usage.context.size', { used: roundTokens(ctx.used), window: roundTokens(ctx.window) }),
           )}
           <Box key="usage-bar" flexDirection="row" flexShrink={0}>
